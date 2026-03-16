@@ -447,8 +447,8 @@
             </div>
             <div class="form-group">
               <label>Bot Token</label>
-              <input type="text" id="telegramBotToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" />
-              <small>从 @BotFather 获取机器人 Token</small>
+              <input type="password" id="telegramBotToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" autocomplete="off" />
+              <small>从 @BotFather 获取机器人 Token（已脱敏显示，重新输入即可更新）</small>
             </div>
             <div class="form-group">
               <label>代理设置（中国大陆必需）</label>
@@ -468,8 +468,8 @@
             </div>
             <div class="form-group">
               <label>Chat ID</label>
-              <input type="text" id="telegramChatId" placeholder="扫码自动填入，或手动输入" />
-              <small>使用上方二维码扫码自动获取，或手动输入你的 Chat ID</small>
+              <input type="password" id="telegramChatId" placeholder="扫码自动填入，或手动输入" autocomplete="off" />
+              <small>使用上方二维码扫码自动获取，或手动输入你的 Chat ID（已脱敏显示）</small>
             </div>
           </div>
 
@@ -663,12 +663,24 @@
         // Webhook 配置
         updateToggle('webhookEnabled', config.webhookEnabled);
         document.getElementById('webhookType').value = config.webhookType || 'dingtalk';
-        document.getElementById('webhookUrl').value = config.webhookUrl || '';
+        const webhookUrlInput = document.getElementById('webhookUrl');
+        if (config.hasWebhookUrl) {
+          webhookUrlInput.value = '';
+          webhookUrlInput.placeholder = '已配置 (' + config.webhookUrl + ')，重新输入可更新';
+        }
 
         // Telegram 配置
         updateToggle('telegramEnabled', config.telegramEnabled || false);
-        document.getElementById('telegramBotToken').value = config.telegramBotToken || '';
-        document.getElementById('telegramChatId').value = config.telegramChatId || '';
+        const tokenInput = document.getElementById('telegramBotToken');
+        const chatIdInput = document.getElementById('telegramChatId');
+        if (config.hasToken) {
+          tokenInput.value = '';
+          tokenInput.placeholder = '已配置 (' + config.telegramBotToken + ')，重新输入可更新';
+        }
+        if (config.hasChatId) {
+          chatIdInput.value = '';
+          chatIdInput.placeholder = '已配置 (' + config.telegramChatId + ')，重新输入可更新';
+        }
         document.getElementById('telegramProxyHost').value = config.telegramProxyHost || '';
         document.getElementById('telegramProxyPort').value = config.telegramProxyPort || '';
       } catch (error) {
@@ -717,12 +729,12 @@
         webhookConfig: {
           enabled: document.getElementById('webhookEnabled').checked,
           type: document.getElementById('webhookType').value,
-          url: document.getElementById('webhookUrl').value
+          url: document.getElementById('webhookUrl').value || '****'
         },
         telegramConfig: {
           enabled: document.getElementById('telegramEnabled').checked,
-          botToken: document.getElementById('telegramBotToken').value,
-          chatId: document.getElementById('telegramChatId').value,
+          botToken: document.getElementById('telegramBotToken').value || '****',
+          chatId: document.getElementById('telegramChatId').value || '****',
           proxyHost: document.getElementById('telegramProxyHost').value,
           proxyPort: document.getElementById('telegramProxyPort').value
         }
@@ -928,7 +940,11 @@
         }
 
         try {
-          const res = await fetch(`/api/telegram/chatid/${encodeURIComponent(botToken)}`);
+          const res = await fetch('/api/telegram/chatid', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ botToken })
+          });
           const data = await res.json();
 
           if (data.success) {

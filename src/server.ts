@@ -12,6 +12,11 @@ import fs from 'fs';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+function maskSecret(value: string, visibleEnd = 4): string {
+  if (!value || value.length <= visibleEnd) return '****';
+  return '****' + value.slice(-visibleEnd);
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
@@ -91,12 +96,15 @@ app.get('/api/config', (req, res) => {
       emailTo: envVars.EMAIL_TO || '',
       webhookEnabled: envVars.WEBHOOK_ENABLED === 'true',
       webhookType: envVars.WEBHOOK_TYPE || 'dingtalk',
-      webhookUrl: envVars.WEBHOOK_URL || '',
+      webhookUrl: envVars.WEBHOOK_URL ? maskSecret(envVars.WEBHOOK_URL, 8) : '',
       telegramEnabled: envVars.TELEGRAM_ENABLED === 'true',
-      telegramBotToken: envVars.TELEGRAM_BOT_TOKEN || '',
-      telegramChatId: envVars.TELEGRAM_CHAT_ID || '',
+      telegramBotToken: envVars.TELEGRAM_BOT_TOKEN ? maskSecret(envVars.TELEGRAM_BOT_TOKEN) : '',
+      telegramChatId: envVars.TELEGRAM_CHAT_ID ? maskSecret(envVars.TELEGRAM_CHAT_ID) : '',
       telegramProxyHost: envVars.TELEGRAM_PROXY_HOST || '',
-      telegramProxyPort: envVars.TELEGRAM_PROXY_PORT || ''
+      telegramProxyPort: envVars.TELEGRAM_PROXY_PORT || '',
+      hasToken: !!envVars.TELEGRAM_BOT_TOKEN,
+      hasChatId: !!envVars.TELEGRAM_CHAT_ID,
+      hasWebhookUrl: !!envVars.WEBHOOK_URL
     });
   } else {
     res.json({
@@ -139,16 +147,18 @@ app.post('/api/config', (req, res) => {
       if (emailConfig.to) updateEnv('EMAIL_TO', emailConfig.to);
     }
 
+    const isNotMasked = (val: string) => val && !val.startsWith('****');
+
     if (webhookConfig) {
       updateEnv('WEBHOOK_ENABLED', webhookConfig.enabled ? 'true' : 'false');
-      if (webhookConfig.url) updateEnv('WEBHOOK_URL', webhookConfig.url);
+      if (isNotMasked(webhookConfig.url)) updateEnv('WEBHOOK_URL', webhookConfig.url);
       if (webhookConfig.type) updateEnv('WEBHOOK_TYPE', webhookConfig.type);
     }
 
     if (telegramConfig) {
       updateEnv('TELEGRAM_ENABLED', telegramConfig.enabled ? 'true' : 'false');
-      if (telegramConfig.botToken) updateEnv('TELEGRAM_BOT_TOKEN', telegramConfig.botToken);
-      if (telegramConfig.chatId) updateEnv('TELEGRAM_CHAT_ID', telegramConfig.chatId);
+      if (isNotMasked(telegramConfig.botToken)) updateEnv('TELEGRAM_BOT_TOKEN', telegramConfig.botToken);
+      if (isNotMasked(telegramConfig.chatId)) updateEnv('TELEGRAM_CHAT_ID', telegramConfig.chatId);
       if (telegramConfig.proxyHost) updateEnv('TELEGRAM_PROXY_HOST', telegramConfig.proxyHost);
       if (telegramConfig.proxyPort) updateEnv('TELEGRAM_PROXY_PORT', telegramConfig.proxyPort.toString());
     }
@@ -293,9 +303,12 @@ app.post('/api/telegram/qrcode', async (req, res) => {
 });
 
 // 获取 Telegram Chat ID（轮询方式）
-app.get('/api/telegram/chatid/:botToken', async (req, res) => {
+app.post('/api/telegram/chatid', async (req, res) => {
   try {
-    const botToken = req.params.botToken;
+    const { botToken } = req.body;
+    if (!botToken) {
+      return res.status(400).json({ success: false, message: '请提供 Bot Token' });
+    }
     const TelegramBot = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
 
