@@ -387,10 +387,24 @@ app.post('/api/telegram/test', async (req, res) => {
 async function startServer() {
   await monitor.start();
 
-  app.listen(PORT, () => {
-    console.log(`\n🌐 Web 界面已启动: http://localhost:${PORT}`);
-    console.log(`📊 在浏览器中打开上述地址进行配置和监控\n`);
-  });
+  const tryListen = (port: number, maxRetries = 5): void => {
+    const server = app.listen(port, () => {
+      console.log(`\n🌐 Web 界面已启动: http://localhost:${port}`);
+      console.log(`📊 在浏览器中打开上述地址进行配置和监控\n`);
+    });
+
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE' && maxRetries > 0) {
+        console.warn(`⚠️ 端口 ${port} 已被占用，尝试端口 ${port + 1}...`);
+        tryListen(port + 1, maxRetries - 1);
+      } else {
+        console.error(`❌ 服务启动失败:`, err.message);
+        process.exit(1);
+      }
+    });
+  };
+
+  tryListen(Number(PORT));
 }
 
 // 优雅退出

@@ -1,5 +1,23 @@
-import axios from 'axios';
+import axios, { AxiosRequestConfig } from 'axios';
 import { AssetType } from '../types';
+
+async function requestWithRetry<T>(config: AxiosRequestConfig, retries = 3, delay = 2000): Promise<T> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios(config);
+      return response.data as T;
+    } catch (error: any) {
+      const isLast = attempt === retries;
+      if (isLast) throw error;
+      const isRetryable = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+        || error.code === 'ECONNRESET' || !error.response || error.response.status >= 500;
+      if (!isRetryable) throw error;
+      console.warn(`⚠️ 请求失败 (${attempt}/${retries})，${delay / 1000}s 后重试...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw new Error('请求失败');
+}
 
 // 价格数据提供者接口
 export interface PriceProvider {
@@ -37,11 +55,12 @@ class BinanceProvider implements PriceProvider {
   ];
 
   async getPrice(symbol: string): Promise<number> {
-    const response = await axios.get(`${this.API}/ticker/price`, {
+    const data = await requestWithRetry<{ price: string }>({
+      url: `${this.API}/ticker/price`,
       params: { symbol },
-      timeout: 5000
+      timeout: 15000
     });
-    return parseFloat(response.data.price);
+    return parseFloat(data.price);
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {
@@ -59,8 +78,11 @@ class BinanceProvider implements PriceProvider {
 
     // 先尝试从 API 获取
     try {
-      const response = await axios.get(`${this.API}/exchangeInfo`, { timeout: 5000 });
-      const symbols = response.data.symbols
+      const data = await requestWithRetry<{ symbols: any[] }>({
+        url: `${this.API}/exchangeInfo`,
+        timeout: 15000
+      });
+      const symbols = data.symbols
         .filter((s: any) =>
           s.symbol.toLowerCase().includes(q) ||
           s.baseAsset.toLowerCase().includes(q)
