@@ -1,4 +1,5 @@
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
+import initSqlJs from 'sql.js';
+import type { Database as SqlJsDatabase } from 'sql.js';
 import { DATABASE_PATH } from '../config';
 import { Asset, PriceData, AssetType } from '../types';
 import * as fs from 'fs';
@@ -78,7 +79,7 @@ export class AssetDatabase {
     if (result.length === 0) return [];
 
     const rows = result[0];
-    return rows.values.map(row => ({
+    return rows.values.map((row: any[]) => ({
       id: row[0] as string,
       type: row[1] as AssetType,
       symbol: row[2] as string,
@@ -114,7 +115,7 @@ export class AssetDatabase {
     if (result.length === 0) return [];
 
     const rows = result[0];
-    return rows.values.map(row => ({
+    return rows.values.map((row: any[]) => ({
       assetId: row[0] as string,
       price: row[1] as number,
       timestamp: row[2] as number
