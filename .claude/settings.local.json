@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 38696)",
+      "Bash(taskkill //F //PID 36128 && sleep 2 && npm run dev)",
+      "Bash(taskkill //F //PID 11372 && sleep 2 && npm run dev)",
+      "Bash(curl -s \"http://localhost:3001/api/search/crypto?q=BTC\" | head -20)",
+      "Bash(curl -s \"https://api.binance.com/api/v3/exchangeInfo\" | grep -o '\"symbol\":\"[^\"]*BTC[^\"]*\"' | head -10)",
+      "Bash(curl -s \"https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT\")",
+      "Bash(taskkill //F //PID 21840 && sleep 2 && npm run dev)",
+      "Bash(curl -s \"http://localhost:3001/api/search/crypto?q=btc\" | python -m json.tool 2>/dev/null || curl -s \"http://localhost:3001/api/search/crypto?q=btc\")",
+      "Bash(taskkill //F //PID 35636 && sleep 2 && npm run dev)",
+      "Bash(curl -X POST \"http://localhost:3001/api/test/telegram\" \\\\\n  -H \"Content-Type: application/json\" \\\\\n  -d '{\n    \"botToken\": \"8434456768:AAGXyJUQJ4a6EzdYPlL2CYVpE39PRiat58I\",\n    \"chatId\": \"5370437247\"\n  }')",
+      "Bash(curl -s \"https://api.telegram.org/bot8434456768:AAGXyJUQJ4a6EzdYPlL2CYVpE39PRiat58I/getMe\")",
+      "Bash(taskkill //F //PID 40820 && sleep 2 && npm run dev)"
+    ]
+  }
+}

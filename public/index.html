@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>投资标的监控平台</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header {
+      background: white;
+      padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .header h1 { color: #667eea; font-size: 2em; margin-bottom: 10px; }
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+    .tab {
+      flex: 1; padding: 15px; background: white; border: none;
+      border-radius: 10px; cursor: pointer; font-size: 16px;
+      font-weight: 600; transition: all 0.3s;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .tab.active {
+      background: #667eea; color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(102,126,234,0.4);
+    }
+    .content {
+      background: white; padding: 30px;
+      border-radius: 15px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    .add-asset {
+      display: grid;
+      grid-template-columns: 150px 1fr auto;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .add-asset select, .add-asset input {
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    .search-container {
+      position: relative;
+    }
+    .search-results {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border: 2px solid #e0e0e0;
+      border-top: none;
+      border-radius: 0 0 8px 8px;
+      max-height: 300px;
+      overflow-y: auto;
+      z-index: 100;
+      display: none;
+    }
+    .search-results.show { display: block; }
+    .search-item {
+      padding: 12px;
+      cursor: pointer;
+      border-bottom: 1px solid #f0f0f0;
+      transition: background 0.2s;
+    }
+    .search-item:hover { background: #f8f9fa; }
+    .search-item strong { display: block; color: #333; }
+    .search-item small { color: #666; }
+
+    .btn {
+      padding: 12px 24px; background: #667eea; color: white;
+      border: none; border-radius: 8px; cursor: pointer;
+      font-size: 16px; font-weight: 600; transition: all 0.3s;
+      white-space: nowrap;
+    }
+    .btn:hover {
+      background: #5568d3; transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+    }
+    .btn-small {
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+    .btn-danger { background: #ef4444; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-success { background: #10b981; }
+    .btn-success:hover { background: #059669; }
+
+    .asset-list { display: grid; gap: 15px; }
+    .asset-item {
+      display: flex; justify-content: space-between;
+      align-items: center; padding: 20px;
+      background: #f8f9fa; border-radius: 10px;
+      border-left: 4px solid #667eea;
+    }
+    .asset-info h3 { color: #333; margin-bottom: 5px; }
+    .asset-info p { color: #666; font-size: 14px; }
+    .asset-badge {
+      display: inline-block; padding: 4px 12px;
+      background: #667eea; color: white;
+      border-radius: 12px; font-size: 12px;
+      margin-right: 10px;
+    }
+
+    .form-group { margin-bottom: 25px; }
+    .form-group label {
+      display: block; margin-bottom: 8px;
+      color: #333; font-weight: 600;
+    }
+    .form-group input, .form-group select {
+      width: 100%; padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px; font-size: 16px;
+    }
+    .form-group small {
+      display: block; margin-top: 5px;
+      color: #666; font-size: 13px;
+    }
+    .form-section {
+      background: #f8f9fa; padding: 20px;
+      border-radius: 10px; margin-bottom: 20px;
+    }
+    .form-section h3 {
+      color: #667eea; margin-bottom: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .checkbox-group {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .checkbox-group input[type="checkbox"] {
+      width: auto; cursor: pointer;
+    }
+
+    /* 美化开关样式 */
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 30px;
+    }
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 30px;
+    }
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 22px;
+      width: 22px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+    input:checked + .toggle-slider {
+      background-color: #10b981;
+    }
+    input:checked + .toggle-slider:before {
+      transform: translateX(30px);
+    }
+    .toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      font-weight: 600;
+      font-size: 16px;
+    }
+    .toggle-status {
+      font-size: 14px;
+      color: #666;
+      min-width: 40px;
+    }
+    input:checked ~ .toggle-status {
+      color: #10b981;
+      font-weight: 600;
+    }
+
+    .notification {
+      position: fixed; top: 20px; right: 20px;
+      padding: 15px 20px; background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      z-index: 1000; animation: slideIn 0.3s;
+      max-width: 400px;
+    }
+    @keyframes slideIn {
+      from { transform: translateX(400px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .notification.success { border-left: 4px solid #10b981; }
+    .notification.error { border-left: 4px solid #ef4444; }
+
+    .empty-state {
+      text-align: center; padding: 60px 20px; color: #666;
+    }
+    .empty-state h3 { margin-top: 20px; }
+
+    .data-source-info {
+      background: #e8f0fe; padding: 15px;
+      border-radius: 8px; margin-bottom: 20px;
+    }
+    .data-source-info h4 {
+      color: #667eea;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .data-source-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid #d0e0f0;
+    }
+    .data-source-item:last-child { border-bottom: none; }
+    .data-source-item strong { min-width: 100px; }
+    .data-source-item span { color: #666; font-size: 14px; }
+
+    /* 配置页面布局优化 */
+    .config-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+      gap: 20px;
+    }
+    @media (max-width: 1100px) {
+      .config-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* 二维码容器 */
+    .qrcode-container {
+      text-align: center;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+    .qrcode-container img {
+      max-width: 250px;
+      border: 2px solid #667eea;
+      border-radius: 8px;
+      padding: 10px;
+      background: white;
+    }
+    .qrcode-container p {
+      margin-top: 10px;
+      color: #666;
+      font-size: 14px;
+    }
+    .qrcode-container .link {
+      margin-top: 10px;
+      padding: 10px;
+      background: white;
+      border-radius: 5px;
+      word-break: break-all;
+      font-size: 12px;
+      color: #667eea;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📊 投资标的监控平台</h1>
+      <p>支持加密货币、股票、黄金、外汇等多种资产监控</p>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('monitor')">资产监控</button>
+      <button class="tab" onclick="switchTab('config')">系统配置</button>
+    </div>
+
+    <div class="content">
+      <!-- 资产监控 -->
+      <div id="monitor" class="tab-content active">
+        <div class="data-source-info">
+          <h4>📡 数据源说明</h4>
+          <div class="data-source-item">
+            <strong>₿ 加密货币</strong>
+            <span>Binance API - 实时价格，支持搜索</span>
+          </div>
+          <div class="data-source-item">
+            <strong>📈 股票</strong>
+            <span>Yahoo Finance - 全球股票，支持搜索（如：AAPL, 600519.SS）</span>
+          </div>
+          <div class="data-source-item">
+            <strong>🥇 贵金属</strong>
+            <span>Metals API - 黄金、白银、铂金、钯金</span>
+          </div>
+          <div class="data-source-item">
+            <strong>💱 外汇</strong>
+            <span>Exchange Rate API - 主要货币对</span>
+          </div>
+        </div>
+
+        <div class="add-asset">
+          <select id="assetType" onchange="clearSearch()">
+            <option value="crypto">加密货币</option>
+            <option value="stock">股票</option>
+            <option value="metal">贵金属</option>
+            <option value="forex">外汇</option>
+          </select>
+          <div class="search-container">
+            <input type="text" id="assetSearch" placeholder="搜索或输入代码..." oninput="searchAssets()" />
+            <div id="searchResults" class="search-results"></div>
+          </div>
+          <button class="btn" onclick="addAsset()">添加监控</button>
+        </div>
+
+        <div id="assetList" class="asset-list"></div>
+      </div>
+
+      <!-- 系统配置 -->
+      <div id="config" class="tab-content">
+        <form onsubmit="saveConfig(event)">
+          <div class="form-section">
+            <h3>⚙️ 基础配置</h3>
+            <div class="form-group">
+              <label>监控间隔（秒）</label>
+              <input type="number" id="interval" min="60" step="60" />
+              <small>建议设置为 900 秒（15分钟）或更长</small>
+            </div>
+            <div class="form-group">
+              <label>涨跌幅阈值（%）</label>
+              <input type="number" id="threshold" min="0.1" step="0.1" />
+              <small>当价格变动超过此百分比时触发通知</small>
+            </div>
+          </div>
+
+          <div class="config-grid">
+            <!-- 邮件通知 -->
+            <div class="form-section">
+              <h3>
+                <span>📧 邮件通知</span>
+                <button type="button" class="btn btn-small btn-success" onclick="testEmail()">测试</button>
+              </h3>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <span>启用邮件通知</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="emailEnabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-status">已关闭</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label>SMTP 服务器</label>
+                <input type="text" id="emailHost" placeholder="smtp.gmail.com" />
+              </div>
+              <div class="form-group">
+                <label>SMTP 端口</label>
+                <input type="number" id="emailPort" placeholder="587" />
+              </div>
+              <div class="form-group">
+                <label>发件邮箱</label>
+                <input type="email" id="emailUser" placeholder="your-email@gmail.com" />
+              </div>
+              <div class="form-group">
+                <label>邮箱密码/应用专用密码</label>
+                <input type="password" id="emailPass" placeholder="应用专用密码" />
+                <small>Gmail 用户需要在账户设置中生成应用专用密码</small>
+              </div>
+              <div class="form-group">
+                <label>收件邮箱</label>
+                <input type="email" id="emailTo" placeholder="recipient@example.com" />
+              </div>
+            </div>
+
+            <!-- Webhook 通知 -->
+            <div class="form-section">
+              <h3>
+                <span>🔔 Webhook 通知</span>
+                <button type="button" class="btn btn-small btn-success" onclick="testWebhook()">测试</button>
+              </h3>
+              <div class="form-group">
+                <label class="toggle-label">
+                  <span>启用 Webhook 通知</span>
+                  <label class="toggle-switch">
+                    <input type="checkbox" id="webhookEnabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                  <span class="toggle-status">已关闭</span>
+                </label>
+              </div>
+              <div class="form-group">
+                <label>Webhook 类型</label>
+                <select id="webhookType">
+                  <option value="dingtalk">钉钉机器人</option>
+                  <option value="wecom">企业微信机器人</option>
+                  <option value="custom">自定义 Webhook</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Webhook URL</label>
+                <input type="url" id="webhookUrl" placeholder="https://oapi.dingtalk.com/robot/send?access_token=..." />
+                <small>从钉钉/企业微信群机器人设置中获取</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Telegram 通知（全宽） -->
+          <div class="form-section">
+            <h3>
+              <span>📱 Telegram 通知</span>
+              <button type="button" class="btn btn-small btn-success" onclick="testTelegram()">测试</button>
+            </h3>
+            <div class="form-group">
+              <label class="toggle-label">
+                <span>启用 Telegram 通知</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="telegramEnabled" />
+                  <span class="toggle-slider"></span>
+                </label>
+                <span class="toggle-status">已关闭</span>
+              </label>
+            </div>
+            <div class="form-group">
+              <label>Bot Token</label>
+              <input type="text" id="telegramBotToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" />
+              <small>从 @BotFather 获取机器人 Token</small>
+            </div>
+            <div class="form-group">
+              <label>代理设置（中国大陆必需）</label>
+              <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 10px;">
+                <input type="text" id="telegramProxyHost" placeholder="代理地址，如: 127.0.0.1" />
+                <input type="number" id="telegramProxyPort" placeholder="端口，如: 7890" />
+              </div>
+              <small>⚠️ 中国大陆用户必须配置代理才能使用 Telegram。常见端口：Clash 7890, V2Ray 10808</small>
+            </div>
+            <div class="form-group">
+              <label>获取 Chat ID</label>
+              <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <button type="button" class="btn" onclick="generateQRCode()" style="flex: 1;">生成二维码扫码获取</button>
+                <button type="button" class="btn btn-small" onclick="getTelegramChatId()">手动获取</button>
+              </div>
+              <div id="qrcodeContainer"></div>
+            </div>
+            <div class="form-group">
+              <label>Chat ID</label>
+              <input type="text" id="telegramChatId" placeholder="扫码自动填入，或手动输入" />
+              <small>使用上方二维码扫码自动获取，或手动输入你的 Chat ID</small>
+            </div>
+          </div>
+
+          <button type="submit" class="btn" style="width: 100%;">保存配置</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const typeNames = {
+      crypto: '加密货币',
+      stock: '股票',
+      metal: '贵金属',
+      forex: '外汇'
+    };
+
+    const typeEmojis = {
+      crypto: '₿',
+      stock: '📈',
+      metal: '🥇',
+      forex: '💱'
+    };
+
+    let searchTimeout;
+    let selectedAsset = null;
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById(tabName).classList.add('active');
+
+      if (tabName === 'monitor') loadAssets();
+      if (tabName === 'config') loadConfig();
+    }
+
+    function showNotification(message, type = 'success') {
+      const notification = document.createElement('div');
+      notification.className = `notification ${type}`;
+      notification.textContent = message;
+      document.body.appendChild(notification);
+      setTimeout(() => notification.remove(), 4000);
+    }
+
+    function clearSearch() {
+      document.getElementById('assetSearch').value = '';
+      document.getElementById('searchResults').classList.remove('show');
+      selectedAsset = null;
+    }
+
+    async function searchAssets() {
+      clearTimeout(searchTimeout);
+      const query = document.getElementById('assetSearch').value.trim();
+      const type = document.getElementById('assetType').value;
+      const resultsDiv = document.getElementById('searchResults');
+
+      if (query.length < 2) {
+        resultsDiv.classList.remove('show');
+        return;
+      }
+
+      searchTimeout = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/search/${type}?q=${encodeURIComponent(query)}`);
+          const results = await res.json();
+
+          if (results.length === 0) {
+            resultsDiv.innerHTML = '<div class="search-item"><small>未找到结果</small></div>';
+          } else {
+            resultsDiv.innerHTML = results.map(r => `
+              <div class="search-item" onclick="selectAsset('${r.symbol}', '${r.name.replace(/'/g, "\\'")}')">
+                <strong>${r.symbol}</strong>
+                <small>${r.name}</small>
+              </div>
+            `).join('');
+          }
+          resultsDiv.classList.add('show');
+        } catch (error) {
+          console.error('搜索失败:', error);
+        }
+      }, 300);
+    }
+
+    function selectAsset(symbol, name) {
+      selectedAsset = { symbol, name };
+      document.getElementById('assetSearch').value = `${symbol} - ${name}`;
+      document.getElementById('searchResults').classList.remove('show');
+    }
+
+    async function loadAssets() {
+      try {
+        const res = await fetch('/api/assets');
+        const assets = await res.json();
+        const list = document.getElementById('assetList');
+
+        if (assets.length === 0) {
+          list.innerHTML = `
+            <div class="empty-state">
+              <h3>还没有添加监控资产</h3>
+              <p>在上方搜索或输入代码添加监控</p>
+            </div>
+          `;
+          return;
+        }
+
+        list.innerHTML = assets.map(a => `
+          <div class="asset-item">
+            <div class="asset-info">
+              <h3>${typeEmojis[a.type]} ${a.name}</h3>
+              <p><span class="asset-badge">${typeNames[a.type]}</span>${a.symbol}</p>
+            </div>
+            <button class="btn btn-danger" onclick="removeAsset('${a.id}')">删除</button>
+          </div>
+        `).join('');
+      } catch (error) {
+        showNotification('加载失败: ' + error.message, 'error');
+      }
+    }
+
+    async function addAsset() {
+      const type = document.getElementById('assetType').value;
+      let symbol, name;
+
+      if (selectedAsset) {
+        symbol = selectedAsset.symbol;
+        name = selectedAsset.name;
+      } else {
+        const input = document.getElementById('assetSearch').value.trim();
+        if (!input) {
+          showNotification('请搜索或输入资产代码', 'error');
+          return;
+        }
+        symbol = input.split(' - ')[0];
+        name = input.split(' - ')[1] || symbol;
+      }
+
+      try {
+        const res = await fetch('/api/assets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, symbol, name })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification(data.message);
+          clearSearch();
+          loadAssets();
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('添加失败: ' + error.message, 'error');
+      }
+    }
+
+    async function removeAsset(id) {
+      if (!confirm(`确定要删除 ${id} 的监控吗？`)) return;
+
+      try {
+        const res = await fetch(`/api/assets/${id}`, { method: 'DELETE' });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification(data.message);
+          loadAssets();
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('删除失败: ' + error.message, 'error');
+      }
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+
+        document.getElementById('interval').value = config.interval / 1000;
+        document.getElementById('threshold').value = config.threshold;
+
+        // 邮件配置
+        updateToggle('emailEnabled', config.emailEnabled);
+        document.getElementById('emailHost').value = config.emailHost || '';
+        document.getElementById('emailPort').value = config.emailPort || '';
+        document.getElementById('emailUser').value = config.emailUser || '';
+        document.getElementById('emailTo').value = config.emailTo || '';
+
+        // Webhook 配置
+        updateToggle('webhookEnabled', config.webhookEnabled);
+        document.getElementById('webhookType').value = config.webhookType || 'dingtalk';
+        document.getElementById('webhookUrl').value = config.webhookUrl || '';
+
+        // Telegram 配置
+        updateToggle('telegramEnabled', config.telegramEnabled || false);
+        document.getElementById('telegramBotToken').value = config.telegramBotToken || '';
+        document.getElementById('telegramChatId').value = config.telegramChatId || '';
+        document.getElementById('telegramProxyHost').value = config.telegramProxyHost || '';
+        document.getElementById('telegramProxyPort').value = config.telegramProxyPort || '';
+      } catch (error) {
+        showNotification('加载配置失败: ' + error.message, 'error');
+      }
+    }
+
+    function updateToggle(id, checked) {
+      const checkbox = document.getElementById(id);
+      checkbox.checked = checked;
+      const status = checkbox.parentElement.parentElement.querySelector('.toggle-status');
+      if (status) {
+        status.textContent = checked ? '已启用' : '已关闭';
+      }
+    }
+
+    // 监听开关变化
+    document.addEventListener('DOMContentLoaded', () => {
+      ['emailEnabled', 'webhookEnabled', 'telegramEnabled'].forEach(id => {
+        const checkbox = document.getElementById(id);
+        if (checkbox) {
+          checkbox.addEventListener('change', (e) => {
+            const status = e.target.parentElement.parentElement.querySelector('.toggle-status');
+            if (status) {
+              status.textContent = e.target.checked ? '已启用' : '已关闭';
+            }
+          });
+        }
+      });
+    });
+
+    async function saveConfig(event) {
+      event.preventDefault();
+
+      const config = {
+        interval: parseInt(document.getElementById('interval').value) * 1000,
+        threshold: parseFloat(document.getElementById('threshold').value),
+        emailConfig: {
+          enabled: document.getElementById('emailEnabled').checked,
+          host: document.getElementById('emailHost').value,
+          port: parseInt(document.getElementById('emailPort').value),
+          user: document.getElementById('emailUser').value,
+          pass: document.getElementById('emailPass').value,
+          to: document.getElementById('emailTo').value
+        },
+        webhookConfig: {
+          enabled: document.getElementById('webhookEnabled').checked,
+          type: document.getElementById('webhookType').value,
+          url: document.getElementById('webhookUrl').value
+        },
+        telegramConfig: {
+          enabled: document.getElementById('telegramEnabled').checked,
+          botToken: document.getElementById('telegramBotToken').value,
+          chatId: document.getElementById('telegramChatId').value,
+          proxyHost: document.getElementById('telegramProxyHost').value,
+          proxyPort: document.getElementById('telegramProxyPort').value
+        }
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification(data.message);
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('保存失败: ' + error.message, 'error');
+      }
+    }
+
+    async function testEmail() {
+      const config = {
+        host: document.getElementById('emailHost').value,
+        port: parseInt(document.getElementById('emailPort').value),
+        user: document.getElementById('emailUser').value,
+        pass: document.getElementById('emailPass').value,
+        to: document.getElementById('emailTo').value
+      };
+
+      if (!config.host || !config.user || !config.pass || !config.to) {
+        showNotification('请先填写完整的邮件配置', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/test/email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification(data.message);
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('测试失败: ' + error.message, 'error');
+      }
+    }
+
+    async function testWebhook() {
+      const config = {
+        url: document.getElementById('webhookUrl').value,
+        type: document.getElementById('webhookType').value
+      };
+
+      if (!config.url) {
+        showNotification('请先填写 Webhook URL', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/test/webhook', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification(data.message);
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('测试失败: ' + error.message, 'error');
+      }
+    }
+
+    async function testTelegram() {
+      const config = {
+        botToken: document.getElementById('telegramBotToken').value,
+        chatId: document.getElementById('telegramChatId').value,
+        proxyHost: document.getElementById('telegramProxyHost').value,
+        proxyPort: document.getElementById('telegramProxyPort').value
+      };
+
+      if (!config.botToken || !config.chatId) {
+        showNotification('请先填写 Bot Token 和 Chat ID', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/test/telegram', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(config)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification(data.message);
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('测试失败: ' + error.message, 'error');
+      }
+    }
+
+    async function getTelegramChatId() {
+      const botToken = document.getElementById('telegramBotToken').value.trim();
+
+      if (!botToken) {
+        showNotification('请先填写 Bot Token', 'error');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/telegram/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ botToken })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('telegramChatId').value = data.chatId;
+          showNotification(`✅ ${data.message}\n用户: ${data.firstName} (@${data.username})`);
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('获取失败: ' + error.message, 'error');
+      }
+    }
+
+    let pollInterval;
+
+    async function generateQRCode() {
+      const botToken = document.getElementById('telegramBotToken').value.trim();
+
+      if (!botToken) {
+        showNotification('请先填写 Bot Token', 'error');
+        return;
+      }
+
+      const container = document.getElementById('qrcodeContainer');
+      container.innerHTML = '<p>正在生成二维码...</p>';
+
+      try {
+        const res = await fetch('/api/telegram/qrcode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ botToken })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          container.innerHTML = `
+            <div class="qrcode-container">
+              <p><strong>📱 使用 Telegram 扫描二维码</strong></p>
+              <img src="${data.qrCode}" alt="Telegram QR Code" />
+              <p>或点击链接：</p>
+              <div class="link">
+                <a href="${data.deepLink}" target="_blank">${data.deepLink}</a>
+              </div>
+              <p style="color: #10b981; font-weight: 600; margin-top: 15px;">等待扫码中...</p>
+            </div>
+          `;
+
+          // 开始轮询获取 Chat ID
+          startPolling(botToken);
+        } else {
+          container.innerHTML = `<p style="color: #ef4444;">${data.message}</p>`;
+        }
+      } catch (error) {
+        container.innerHTML = `<p style="color: #ef4444;">生成失败: ${error.message}</p>`;
+      }
+    }
+
+    function startPolling(botToken) {
+      // 清除之前的轮询
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+
+      let attempts = 0;
+      const maxAttempts = 60; // 最多轮询 60 次（2 分钟）
+
+      pollInterval = setInterval(async () => {
+        attempts++;
+
+        if (attempts > maxAttempts) {
+          clearInterval(pollInterval);
+          showNotification('超时：未检测到扫码，请重新生成二维码', 'error');
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/telegram/chatid/${encodeURIComponent(botToken)}`);
+          const data = await res.json();
+
+          if (data.success) {
+            clearInterval(pollInterval);
+            document.getElementById('telegramChatId').value = data.chatId;
+            document.getElementById('qrcodeContainer').innerHTML = `
+              <div class="qrcode-container">
+                <p style="color: #10b981; font-size: 18px;">✅ 扫码成功！</p>
+                <p>用户: ${data.firstName} (@${data.username})</p>
+                <p>Chat ID: ${data.chatId}</p>
+              </div>
+            `;
+            showNotification(`✅ 扫码成功！Chat ID: ${data.chatId}`);
+          }
+        } catch (error) {
+          console.error('轮询失败:', error);
+        }
+      }, 2000); // 每 2 秒轮询一次
+    }
+
+    // 点击外部关闭搜索结果
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.search-container')) {
+        document.getElementById('searchResults').classList.remove('show');
+      }
+    });
+
+    loadAssets();
+  </script>
+</body>
+</html>
