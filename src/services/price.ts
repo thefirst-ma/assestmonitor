@@ -1,7 +1,16 @@
 import axios, { AxiosRequestConfig } from 'axios';
 import { AssetType } from '../types';
+import { proxyConfig } from '../config';
+
+function applyProxy(config: AxiosRequestConfig): AxiosRequestConfig {
+  if (proxyConfig.enabled) {
+    config.proxy = { host: proxyConfig.host, port: proxyConfig.port, protocol: 'http' };
+  }
+  return config;
+}
 
 async function requestWithRetry<T>(config: AxiosRequestConfig, retries = 3, delay = 2000): Promise<T> {
+  applyProxy(config);
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       const response = await axios(config);
@@ -10,7 +19,8 @@ async function requestWithRetry<T>(config: AxiosRequestConfig, retries = 3, dela
       const isLast = attempt === retries;
       if (isLast) throw error;
       const isRetryable = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
-        || error.code === 'ECONNRESET' || !error.response || error.response.status >= 500;
+        || error.code === 'ECONNRESET' || error.code === 'EPROTO'
+        || !error.response || error.response.status >= 500 || error.response.status === 451;
       if (!isRetryable) throw error;
       console.warn(`⚠️ 请求失败 (${attempt}/${retries})，${delay / 1000}s 后重试...`);
       await new Promise(r => setTimeout(r, delay));
@@ -26,11 +36,8 @@ export interface PriceProvider {
   searchSymbols(query: string): Promise<Array<{ symbol: string; name: string }>>;
 }
 
-// Binance API - 加密货币
-class BinanceProvider implements PriceProvider {
-  private readonly API = 'https://api.binance.com/api/v3';
-
-  // 常见加密货币列表（备用）
+// 加密货币 - OKX 优先，Binance 备用
+class CryptoProvider implements PriceProvider {
   private readonly commonCryptos = [
     { symbol: 'BTCUSDT', name: 'Bitcoin/USDT' },
     { symbol: 'ETHUSDT', name: 'Ethereum/USDT' },
@@ -54,9 +61,31 @@ class BinanceProvider implements PriceProvider {
     { symbol: 'TRXUSDT', name: 'TRON/USDT' }
   ];
 
+  private toOkxInstId(symbol: string): string {
+    const s = symbol.toUpperCase();
+    if (s.endsWith('USDT')) return s.replace('USDT', '-USDT');
+    if (s.endsWith('USDC')) return s.replace('USDC', '-USDC');
+    if (s.endsWith('BTC')) return s.replace('BTC', '-BTC');
+    return s + '-USDT';
+  }
+
   async getPrice(symbol: string): Promise<number> {
+    // OKX (国内直连)
+    try {
+      const instId = this.toOkxInstId(symbol);
+      const data = await requestWithRetry<any>({
+        url: 'https://www.okx.com/api/v5/market/ticker',
+        params: { instId },
+        timeout: 15000
+      }, 2, 1000);
+      if (data?.data?.[0]?.last) return parseFloat(data.data[0].last);
+    } catch (e: any) {
+      console.warn(`OKX 获取失败，尝试 Binance: ${e.message}`);
+    }
+
+    // Binance 备用
     const data = await requestWithRetry<{ price: string }>({
-      url: `${this.API}/ticker/price`,
+      url: 'https://api.binance.com/api/v3/ticker/price',
       params: { symbol },
       timeout: 15000
     });
@@ -68,7 +97,6 @@ class BinanceProvider implements PriceProvider {
       await this.getPrice(symbol);
       return true;
     } catch {
-      // 如果 API 失败，检查是否在常见列表中
       return this.commonCryptos.some(c => c.symbol === symbol);
     }
   }
@@ -76,29 +104,27 @@ class BinanceProvider implements PriceProvider {
   async searchSymbols(query: string): Promise<Array<{ symbol: string; name: string }>> {
     const q = query.toLowerCase();
 
-    // 先尝试从 API 获取
     try {
-      const data = await requestWithRetry<{ symbols: any[] }>({
-        url: `${this.API}/exchangeInfo`,
+      const data = await requestWithRetry<any>({
+        url: 'https://www.okx.com/api/v5/market/tickers',
+        params: { instType: 'SPOT' },
         timeout: 15000
-      });
-      const symbols = data.symbols
-        .filter((s: any) =>
-          s.symbol.toLowerCase().includes(q) ||
-          s.baseAsset.toLowerCase().includes(q)
-        )
-        .slice(0, 20)
-        .map((s: any) => ({
-          symbol: s.symbol,
-          name: `${s.baseAsset}/${s.quoteAsset}`
-        }));
+      }, 2, 1000);
 
-      if (symbols.length > 0) return symbols;
-    } catch (error) {
-      console.log('Binance API 不可用，使用本地列表');
+      if (data?.data) {
+        const results = data.data
+          .filter((t: any) => t.instId.toLowerCase().includes(q))
+          .slice(0, 20)
+          .map((t: any) => {
+            const [base, quote] = t.instId.split('-');
+            return { symbol: base + quote, name: `${base}/${quote}` };
+          });
+        if (results.length > 0) return results;
+      }
+    } catch {
+      console.log('OKX API 搜索不可用，使用本地列表');
     }
 
-    // 如果 API 失败，使用本地常见列表
     return this.commonCryptos.filter(c =>
       c.symbol.toLowerCase().includes(q) ||
       c.name.toLowerCase().includes(q)
@@ -106,15 +132,15 @@ class BinanceProvider implements PriceProvider {
   }
 }
 
-// Yahoo Finance API - 股票（支持全球市场）
+// Yahoo Finance API - 股票
 class YahooFinanceProvider implements PriceProvider {
   async getPrice(symbol: string): Promise<number> {
-    const response = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
+    const data = await requestWithRetry<any>({
+      url: `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`,
       params: { interval: '1d', range: '1d' },
-      timeout: 10000
+      timeout: 15000
     });
-    const quote = response.data.chart.result[0].meta.regularMarketPrice;
-    return parseFloat(quote);
+    return parseFloat(data.chart.result[0].meta.regularMarketPrice);
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {
@@ -128,23 +154,14 @@ class YahooFinanceProvider implements PriceProvider {
 
   async searchSymbols(query: string): Promise<Array<{ symbol: string; name: string }>> {
     try {
-      // Yahoo Finance 搜索支持全球股票市场
-      // 美股：AAPL, TSLA, GOOGL
-      // A股：600519.SS（上交所）, 000001.SZ（深交所）
-      // 港股：0700.HK
-      // 其他市场也支持
-      const response = await axios.get(`https://query1.finance.yahoo.com/v1/finance/search`, {
-        params: {
-          q: query,
-          quotesCount: 30,  // 增加结果数量
-          newsCount: 0,
-          enableFuzzyQuery: true  // 启用模糊搜索
-        },
-        timeout: 10000
+      const data = await requestWithRetry<any>({
+        url: 'https://query1.finance.yahoo.com/v1/finance/search',
+        params: { q: query, quotesCount: 30, newsCount: 0, enableFuzzyQuery: true },
+        timeout: 15000
       });
 
-      return response.data.quotes
-        .filter((q: any) => q.quoteType === 'EQUITY' || q.quoteType === 'ETF')  // 只返回股票和ETF
+      return data.quotes
+        .filter((q: any) => q.quoteType === 'EQUITY' || q.quoteType === 'ETF')
         .map((q: any) => ({
           symbol: q.symbol,
           name: `${q.longname || q.shortname || q.symbol} (${q.exchDisp || q.exchange || ''})`
@@ -156,19 +173,43 @@ class YahooFinanceProvider implements PriceProvider {
   }
 }
 
-// Metals API - 贵金属
+// 贵金属 - 多源备用
 class MetalsProvider implements PriceProvider {
   private readonly metals = [
-    { symbol: 'gold', name: '黄金 (Gold)' },
-    { symbol: 'silver', name: '白银 (Silver)' },
-    { symbol: 'platinum', name: '铂金 (Platinum)' },
-    { symbol: 'palladium', name: '钯金 (Palladium)' }
+    { symbol: 'gold', name: '黄金 (Gold)', alias: 'XAU' },
+    { symbol: 'silver', name: '白银 (Silver)', alias: 'XAG' },
+    { symbol: 'platinum', name: '铂金 (Platinum)', alias: 'XPT' },
+    { symbol: 'palladium', name: '钯金 (Palladium)', alias: 'XPD' }
   ];
 
   async getPrice(symbol: string): Promise<number> {
-    // 使用免费的金属价格 API
-    const response = await axios.get(`https://api.metals.live/v1/spot/${symbol.toLowerCase()}`);
-    return parseFloat(response.data[0].price);
+    // 尝试 metals.live
+    try {
+      const data = await requestWithRetry<any[]>({
+        url: `https://api.metals.live/v1/spot/${symbol.toLowerCase()}`,
+        timeout: 10000
+      }, 2, 1000);
+      if (data?.[0]?.price) return parseFloat(data[0].price);
+    } catch (e: any) {
+      console.warn(`metals.live 不可用: ${e.message}`);
+    }
+
+    // 备用：通过 frankfurter.app 用汇率间接获取 (XAU/XAG 对 USD)
+    const metal = this.metals.find(m => m.symbol.toLowerCase() === symbol.toLowerCase());
+    if (!metal) throw new Error(`未知贵金属: ${symbol}`);
+
+    try {
+      const data = await requestWithRetry<any>({
+        url: `https://api.frankfurter.app/latest`,
+        params: { from: metal.alias, to: 'USD' },
+        timeout: 10000
+      }, 2, 1000);
+      if (data?.rates?.USD) return parseFloat(data.rates.USD);
+    } catch (e: any) {
+      console.warn(`frankfurter 不可用: ${e.message}`);
+    }
+
+    throw new Error(`贵金属 ${symbol} 价格获取失败，所有 API 源均不可用`);
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {
@@ -188,10 +229,12 @@ class ForexProvider implements PriceProvider {
   private readonly currencies = ['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'AUD', 'CAD', 'CHF', 'HKD', 'SGD'];
 
   async getPrice(symbol: string): Promise<number> {
-    // 使用 exchangerate-api.com 免费 API
     const [base, quote] = symbol.split('/');
-    const response = await axios.get(`https://api.exchangerate-api.com/v4/latest/${base}`);
-    return parseFloat(response.data.rates[quote]);
+    const data = await requestWithRetry<any>({
+      url: `https://api.exchangerate-api.com/v4/latest/${base}`,
+      timeout: 15000
+    });
+    return parseFloat(data.rates[quote]);
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {
@@ -228,7 +271,7 @@ export class PriceService {
 
   constructor() {
     this.providers = new Map([
-      ['crypto', new BinanceProvider()],
+      ['crypto', new CryptoProvider()],
       ['stock', new YahooFinanceProvider()],
       ['metal', new MetalsProvider()],
       ['forex', new ForexProvider()]

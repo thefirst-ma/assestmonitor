@@ -3,9 +3,15 @@ import { MonitorConfig } from '../types';
 
 dotenv.config();
 
+export const proxyConfig = {
+  host: process.env.API_PROXY_HOST || process.env.TELEGRAM_PROXY_HOST || '',
+  port: parseInt(process.env.API_PROXY_PORT || process.env.TELEGRAM_PROXY_PORT || '0'),
+  get enabled() { return !!this.host && this.port > 0; }
+};
+
 export const config: MonitorConfig = {
   interval: parseInt(process.env.MONITOR_INTERVAL || '900000'),
-  threshold: parseFloat(process.env.PRICE_CHANGE_THRESHOLD || '5'),
+  threshold: parseFloat(process.env.PRICE_CHANGE_THRESHOLD || '0.1'),
   notifications: {
     email: process.env.EMAIL_ENABLED === 'true' ? {
       enabled: true,
