@@ -173,43 +173,25 @@ class YahooFinanceProvider implements PriceProvider {
   }
 }
 
-// 贵金属 - 多源备用
+// 贵金属 - 通过 Yahoo Finance 期货行情获取
 class MetalsProvider implements PriceProvider {
   private readonly metals = [
-    { symbol: 'gold', name: '黄金 (Gold)', alias: 'XAU' },
-    { symbol: 'silver', name: '白银 (Silver)', alias: 'XAG' },
-    { symbol: 'platinum', name: '铂金 (Platinum)', alias: 'XPT' },
-    { symbol: 'palladium', name: '钯金 (Palladium)', alias: 'XPD' }
+    { symbol: 'gold', name: '黄金 (Gold)', yahoo: 'GC=F' },
+    { symbol: 'silver', name: '白银 (Silver)', yahoo: 'SI=F' },
+    { symbol: 'platinum', name: '铂金 (Platinum)', yahoo: 'PL=F' },
+    { symbol: 'palladium', name: '钯金 (Palladium)', yahoo: 'PA=F' }
   ];
 
   async getPrice(symbol: string): Promise<number> {
-    // 尝试 metals.live
-    try {
-      const data = await requestWithRetry<any[]>({
-        url: `https://api.metals.live/v1/spot/${symbol.toLowerCase()}`,
-        timeout: 10000
-      }, 2, 1000);
-      if (data?.[0]?.price) return parseFloat(data[0].price);
-    } catch (e: any) {
-      console.warn(`metals.live 不可用: ${e.message}`);
-    }
-
-    // 备用：通过 frankfurter.app 用汇率间接获取 (XAU/XAG 对 USD)
     const metal = this.metals.find(m => m.symbol.toLowerCase() === symbol.toLowerCase());
     if (!metal) throw new Error(`未知贵金属: ${symbol}`);
 
-    try {
-      const data = await requestWithRetry<any>({
-        url: `https://api.frankfurter.app/latest`,
-        params: { from: metal.alias, to: 'USD' },
-        timeout: 10000
-      }, 2, 1000);
-      if (data?.rates?.USD) return parseFloat(data.rates.USD);
-    } catch (e: any) {
-      console.warn(`frankfurter 不可用: ${e.message}`);
-    }
-
-    throw new Error(`贵金属 ${symbol} 价格获取失败，所有 API 源均不可用`);
+    const data = await requestWithRetry<any>({
+      url: `https://query1.finance.yahoo.com/v8/finance/chart/${metal.yahoo}`,
+      params: { interval: '1d', range: '1d' },
+      timeout: 15000
+    });
+    return parseFloat(data.chart.result[0].meta.regularMarketPrice);
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {
