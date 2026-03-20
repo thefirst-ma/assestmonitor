@@ -70,14 +70,15 @@ export class InvestmentMonitor {
 
     for (const asset of assets) {
       try {
+        const lastPrice = database.getLatestPrice(asset.id);
         const currentPrice = await priceService.getPrice(asset.type, asset.symbol);
+
         database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
 
-        const lastPrice = database.getLatestPrice(asset.id);
         const emoji = this.getTypeEmoji(asset.type);
         const threshold = asset.threshold || config.threshold;
 
-        if (lastPrice && lastPrice.timestamp !== timestamp) {
+        if (lastPrice) {
           const changePercent = ((currentPrice - lastPrice.price) / lastPrice.price) * 100;
           console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (${changePercent > 0 ? '+' : ''}${changePercent.toFixed(2)}%) [阈值:${threshold}%]`);
 
