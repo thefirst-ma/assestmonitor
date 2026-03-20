@@ -2,11 +2,12 @@ import { database } from './database';
 import { priceService } from './services/price';
 import { NotificationService } from './services/notifier';
 import { config } from './config';
-import { PriceAlert, AssetType } from './types';
+import { PriceAlert, Asset, AssetType } from './types';
 
 export class InvestmentMonitor {
   private notifier: NotificationService;
-  private intervalId?: NodeJS.Timeout;
+  private timers: Map<string, NodeJS.Timeout> = new Map();
+  private running = false;
 
   constructor() {
     this.notifier = new NotificationService(config.notifications);
@@ -14,63 +15,73 @@ export class InvestmentMonitor {
 
   async start(): Promise<void> {
     console.log('🚀 投资标的监控平台启动');
-    console.log(`⏱️  监控间隔: ${config.interval / 1000}秒`);
-    console.log(`📊 涨跌幅阈值: ±${config.threshold}%`);
+    console.log(`⏱️  默认监控间隔: ${config.interval / 1000}秒`);
+    console.log(`📊 默认涨跌幅阈值: ±${config.threshold}%`);
 
-    // 初始化数据库
     await database.init();
-
-    // 立即执行一次
-    await this.checkPrices();
-
-    // 定时执行
-    this.intervalId = setInterval(() => {
-      this.checkPrices().catch(console.error);
-    }, config.interval);
+    this.running = true;
+    this.scheduleAll();
   }
 
   stop(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      console.log('⏹️  监控已停止');
+    this.running = false;
+    for (const [id, timer] of this.timers) {
+      clearInterval(timer);
     }
+    this.timers.clear();
+    console.log('⏹️  监控已停止');
   }
 
-  private async checkPrices(): Promise<void> {
-    const assets = database.getEnabledAssets();
+  scheduleAll(): void {
+    for (const [, timer] of this.timers) {
+      clearInterval(timer);
+    }
+    this.timers.clear();
 
+    const assets = database.getEnabledAssets();
     if (assets.length === 0) {
       console.log('⚠️  没有配置监控资产');
       return;
     }
 
-    console.log(`\n🔍 [${new Date().toLocaleString('zh-CN')}] 检查 ${assets.length} 个资产...`);
+    const groups = new Map<number, Asset[]>();
+    for (const asset of assets) {
+      const interval = asset.interval || config.interval;
+      if (!groups.has(interval)) groups.set(interval, []);
+      groups.get(interval)!.push(asset);
+    }
 
+    for (const [interval, groupAssets] of groups) {
+      const names = groupAssets.map(a => a.name).join(', ');
+      console.log(`⏱️  [${interval / 1000}s] ${names}`);
+
+      this.checkGroup(groupAssets);
+
+      const timer = setInterval(() => {
+        if (this.running) this.checkGroup(groupAssets).catch(console.error);
+      }, interval);
+      this.timers.set(`group_${interval}`, timer);
+    }
+  }
+
+  private async checkGroup(assets: Asset[]): Promise<void> {
+    console.log(`\n🔍 [${new Date().toLocaleString('zh-CN')}] 检查 ${assets.length} 个资产...`);
     const timestamp = Math.floor(Date.now() / 1000);
 
     for (const asset of assets) {
       try {
         const currentPrice = await priceService.getPrice(asset.type, asset.symbol);
+        database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
 
-        // 保存当前价格
-        database.savePrice({
-          assetId: asset.id,
-          price: currentPrice,
-          timestamp
-        });
-
-        // 获取上一次价格
         const lastPrice = database.getLatestPrice(asset.id);
-
-        const typeEmoji = this.getTypeEmoji(asset.type);
+        const emoji = this.getTypeEmoji(asset.type);
+        const threshold = asset.threshold || config.threshold;
 
         if (lastPrice && lastPrice.timestamp !== timestamp) {
           const changePercent = ((currentPrice - lastPrice.price) / lastPrice.price) * 100;
+          console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (${changePercent > 0 ? '+' : ''}${changePercent.toFixed(2)}%) [阈值:${threshold}%]`);
 
-          console.log(`  ${typeEmoji} ${asset.name}: $${currentPrice.toFixed(2)} (${changePercent > 0 ? '+' : ''}${changePercent.toFixed(2)}%)`);
-
-          // 检查是否触发警报
-          if (Math.abs(changePercent) >= config.threshold) {
+          if (Math.abs(changePercent) >= threshold) {
             const alert: PriceAlert = {
               assetId: asset.id,
               assetName: asset.name,
@@ -80,11 +91,10 @@ export class InvestmentMonitor {
               changePercent,
               timestamp: Date.now()
             };
-
             await this.notifier.sendAlert(alert);
           }
         } else {
-          console.log(`  ${typeEmoji} ${asset.name}: $${currentPrice.toFixed(2)} (首次记录)`);
+          console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (首次记录) [间隔:${(asset.interval || config.interval) / 1000}s, 阈值:${threshold}%]`);
         }
       } catch (error: any) {
         console.error(`❌ ${asset.name} 价格获取失败:`, error.message);
@@ -94,40 +104,43 @@ export class InvestmentMonitor {
 
   private getTypeEmoji(type: AssetType): string {
     const emojis: Record<AssetType, string> = {
-      crypto: '₿',
-      stock: '📈',
-      metal: '🥇',
-      forex: '💱'
+      crypto: '₿', stock: '📈', metal: '🥇', forex: '💱'
     };
     return emojis[type] || '📊';
   }
 
-  // 添加监控资产
-  async addAsset(type: AssetType, symbol: string, name?: string): Promise<void> {
+  async addAsset(type: AssetType, symbol: string, name?: string, interval?: number, threshold?: number): Promise<void> {
     const isValid = await priceService.validateSymbol(type, symbol);
-    if (!isValid) {
-      throw new Error(`无效的资产: ${type}:${symbol}`);
-    }
+    if (!isValid) throw new Error(`无效的资产: ${type}:${symbol}`);
 
     const id = `${type}:${symbol}`;
     const assetName = name || symbol;
-    database.addAsset(id, type, symbol, assetName);
-    console.log(`✅ 已添加监控: ${assetName} (${type})`);
+    database.addAsset(id, type, symbol, assetName, interval, threshold);
+    console.log(`✅ 已添加监控: ${assetName} (${type}) [间隔:${(interval || config.interval) / 1000}s, 阈值:${threshold || config.threshold}%]`);
+
+    if (this.running) this.scheduleAll();
   }
 
-  // 移除监控资产
+  updateAsset(id: string, interval?: number, threshold?: number): void {
+    database.updateAsset(id, interval, threshold);
+    console.log(`✏️  已更新: ${id} [间隔:${(interval || config.interval) / 1000}s, 阈值:${threshold || config.threshold}%]`);
+    if (this.running) this.scheduleAll();
+  }
+
   removeAsset(id: string): void {
     database.removeAsset(id);
     console.log(`🗑️  已移除监控: ${id}`);
+    if (this.running) this.scheduleAll();
   }
 
-  // 列出所有监控资产
   listAssets(): void {
     const assets = database.getEnabledAssets();
     console.log('\n📋 当前监控资产:');
     assets.forEach(a => {
       const emoji = this.getTypeEmoji(a.type);
-      console.log(`  ${emoji} ${a.name} (${a.type}:${a.symbol})`);
+      const interval = (a.interval || config.interval) / 1000;
+      const threshold = a.threshold || config.threshold;
+      console.log(`  ${emoji} ${a.name} (${a.type}:${a.symbol}) [${interval}s, ±${threshold}%]`);
     });
   }
 }

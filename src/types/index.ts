@@ -6,6 +6,8 @@ export interface Asset {
   symbol: string;
   name: string;
   enabled: boolean;
+  interval?: number;   // 独立监控间隔（毫秒），null 则用全局
+  threshold?: number;  // 独立涨跌幅阈值（%），null 则用全局
 }
 
 export interface PriceData {

@@ -47,6 +47,14 @@ async function initDatabase(): Promise<void> {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_prices_asset_timestamp ON prices(asset_id, timestamp);`);
 
+  // 迁移：为旧数据库添加 interval/threshold 列
+  try {
+    db.run(`ALTER TABLE assets ADD COLUMN interval INTEGER DEFAULT NULL;`);
+  } catch {}
+  try {
+    db.run(`ALTER TABLE assets ADD COLUMN threshold REAL DEFAULT NULL;`);
+  } catch {}
+
   saveDatabase();
 }
 
@@ -60,10 +68,15 @@ export class AssetDatabase {
     await initDatabase();
   }
 
-  // 添加监控资产
-  addAsset(id: string, type: AssetType, symbol: string, name: string): void {
-    db.run('INSERT OR REPLACE INTO assets (id, type, symbol, name, enabled) VALUES (?, ?, ?, ?, 1)',
-      [id, type, symbol, name]);
+  addAsset(id: string, type: AssetType, symbol: string, name: string, interval?: number, threshold?: number): void {
+    db.run('INSERT OR REPLACE INTO assets (id, type, symbol, name, enabled, interval, threshold) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      [id, type, symbol, name, interval ?? null, threshold ?? null]);
+    saveDatabase();
+  }
+
+  updateAsset(id: string, interval?: number, threshold?: number): void {
+    db.run('UPDATE assets SET interval = ?, threshold = ? WHERE id = ?',
+      [interval ?? null, threshold ?? null, id]);
     saveDatabase();
   }
 
@@ -75,7 +88,7 @@ export class AssetDatabase {
 
   // 获取所有启用的资产
   getEnabledAssets(): Asset[] {
-    const result = db.exec('SELECT id, type, symbol, name, enabled FROM assets WHERE enabled = 1');
+    const result = db.exec('SELECT id, type, symbol, name, enabled, interval, threshold FROM assets WHERE enabled = 1');
     if (result.length === 0) return [];
 
     const rows = result[0];
@@ -84,7 +97,9 @@ export class AssetDatabase {
       type: row[1] as AssetType,
       symbol: row[2] as string,
       name: row[3] as string,
-      enabled: row[4] === 1
+      enabled: row[4] === 1,
+      interval: row[5] as number | undefined,
+      threshold: row[6] as number | undefined
     }));
   }
 

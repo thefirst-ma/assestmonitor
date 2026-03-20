@@ -45,9 +45,22 @@ app.get('/api/assets', (req, res) => {
 // 添加监控资产
 app.post('/api/assets', async (req, res) => {
   try {
-    const { type, symbol, name } = req.body;
-    await monitor.addAsset(type as AssetType, symbol.toUpperCase(), name);
+    const { type, symbol, name, interval, threshold } = req.body;
+    const assetInterval = interval ? interval * 1000 : undefined;
+    await monitor.addAsset(type as AssetType, symbol.toUpperCase(), name, assetInterval, threshold);
     res.json({ success: true, message: `已添加监控: ${name || symbol}` });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// 更新监控资产设置
+app.put('/api/assets/:id', (req, res) => {
+  try {
+    const { interval, threshold } = req.body;
+    const assetInterval = interval ? interval * 1000 : undefined;
+    monitor.updateAsset(req.params.id, assetInterval, threshold);
+    res.json({ success: true, message: '资产设置已更新' });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }

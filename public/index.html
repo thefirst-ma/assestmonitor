@@ -336,6 +336,16 @@
           </div>
           <button class="btn" onclick="addAsset()">添加监控</button>
         </div>
+        <div class="add-asset" style="grid-template-columns: 1fr 1fr;">
+          <div>
+            <label style="font-size:13px;color:#666;">监控间隔（秒，留空用全局）</label>
+            <input type="number" id="assetInterval" placeholder="如 120" min="10" step="10" style="width:100%;padding:10px;border:2px solid #e0e0e0;border-radius:8px;" />
+          </div>
+          <div>
+            <label style="font-size:13px;color:#666;">涨跌幅阈值（%，留空用全局）</label>
+            <input type="number" id="assetThreshold" placeholder="如 0.5" min="0.01" step="0.01" style="width:100%;padding:10px;border:2px solid #e0e0e0;border-radius:8px;" />
+          </div>
+        </div>
 
         <div id="assetList" class="asset-list"></div>
       </div>
@@ -576,15 +586,24 @@
           return;
         }
 
-        list.innerHTML = assets.map(a => `
-          <div class="asset-item">
-            <div class="asset-info">
+        list.innerHTML = assets.map(a => {
+          const interval = a.interval ? (a.interval / 1000) : '全局';
+          const threshold = a.threshold != null ? a.threshold : '全局';
+          return `
+          <div class="asset-item" style="flex-wrap:wrap;">
+            <div class="asset-info" style="flex:1;min-width:200px;">
               <h3>${typeEmojis[a.type]} ${a.name}</h3>
               <p><span class="asset-badge">${typeNames[a.type]}</span>${a.symbol}</p>
+              <p style="margin-top:6px;font-size:13px;color:#888;">⏱️ 间隔: ${interval}s &nbsp;|&nbsp; 📊 阈值: ±${threshold}%</p>
             </div>
-            <button class="btn btn-danger" onclick="removeAsset('${a.id}')">删除</button>
-          </div>
-        `).join('');
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <input type="number" id="intv_${a.id}" placeholder="间隔(秒)" value="${a.interval ? a.interval/1000 : ''}" min="10" step="10" style="width:90px;padding:8px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;" />
+              <input type="number" id="thrs_${a.id}" placeholder="阈值(%)" value="${a.threshold != null ? a.threshold : ''}" min="0.01" step="0.01" style="width:90px;padding:8px;border:2px solid #e0e0e0;border-radius:8px;font-size:13px;" />
+              <button class="btn btn-small btn-success" onclick="updateAsset('${a.id}')">保存</button>
+              <button class="btn btn-small btn-danger" onclick="removeAsset('${a.id}')">删除</button>
+            </div>
+          </div>`;
+        }).join('');
       } catch (error) {
         showNotification('加载失败: ' + error.message, 'error');
       }
@@ -607,17 +626,26 @@
         name = input.split(' - ')[1] || symbol;
       }
 
+      const intervalVal = document.getElementById('assetInterval').value;
+      const thresholdVal = document.getElementById('assetThreshold').value;
+
+      const body = { type, symbol, name };
+      if (intervalVal) body.interval = parseFloat(intervalVal);
+      if (thresholdVal) body.threshold = parseFloat(thresholdVal);
+
       try {
         const res = await fetch('/api/assets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type, symbol, name })
+          body: JSON.stringify(body)
         });
         const data = await res.json();
 
         if (data.success) {
           showNotification(data.message);
           clearSearch();
+          document.getElementById('assetInterval').value = '';
+          document.getElementById('assetThreshold').value = '';
           loadAssets();
         } else {
           showNotification(data.message, 'error');
@@ -642,6 +670,31 @@
         }
       } catch (error) {
         showNotification('删除失败: ' + error.message, 'error');
+      }
+    }
+
+    async function updateAsset(id) {
+      const intervalEl = document.getElementById('intv_' + id);
+      const thresholdEl = document.getElementById('thrs_' + id);
+      const interval = intervalEl && intervalEl.value ? parseFloat(intervalEl.value) : undefined;
+      const threshold = thresholdEl && thresholdEl.value ? parseFloat(thresholdEl.value) : undefined;
+
+      try {
+        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interval, threshold })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          showNotification('设置已更新，重新调度中...');
+          loadAssets();
+        } else {
+          showNotification(data.message, 'error');
+        }
+      } catch (error) {
+        showNotification('更新失败: ' + error.message, 'error');
       }
     }
 
