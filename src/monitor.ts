@@ -110,13 +110,13 @@ export class InvestmentMonitor {
     return emojis[type] || '📊';
   }
 
-  async addAsset(type: AssetType, symbol: string, name?: string, interval?: number, threshold?: number): Promise<void> {
+  async addAsset(type: AssetType, symbol: string, name?: string, userId?: string, interval?: number, threshold?: number): Promise<void> {
     const isValid = await priceService.validateSymbol(type, symbol);
     if (!isValid) throw new Error(`无效的资产: ${type}:${symbol}`);
 
-    const id = `${type}:${symbol}`;
+    const id = userId ? `${userId}:${type}:${symbol}` : `${type}:${symbol}`;
     const assetName = name || symbol;
-    database.addAsset(id, type, symbol, assetName, interval, threshold);
+    database.addAsset(id, userId || '', type, symbol, assetName, interval, threshold);
     console.log(`✅ 已添加监控: ${assetName} (${type}) [间隔:${(interval || config.interval) / 1000}s, 阈值:${threshold || config.threshold}%]`);
 
     if (this.running) this.scheduleAll();

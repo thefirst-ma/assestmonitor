@@ -1,10 +1,12 @@
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import { InvestmentMonitor } from './monitor';
 import { database } from './database';
 import { config } from './config';
 import { priceService } from './services/price';
 import { NotificationService } from './services/notifier';
-import { AssetType } from './types';
+import { authService } from './services/auth';
+import { stripeService } from './services/stripe';
+import { AssetType, PLAN_LIMITS, UserPlan } from './types';
 import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -17,15 +19,98 @@ function maskSecret(value: string, visibleEnd = 4): string {
   return '****' + value.slice(-visibleEnd);
 }
 
+// Stripe webhook needs raw body, must be before express.json()
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req: Request, res: Response) => {
+  try {
+    const sig = req.headers['stripe-signature'] as string;
+    stripeService.handleWebhookEvent(req.body, sig);
+    res.json({ received: true });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
 const monitor = new InvestmentMonitor();
 
-// API 路由
+// ---- Auth middleware ----
 
-// 搜索资产
-app.get('/api/search/:type', async (req, res) => {
+interface AuthRequest extends Request {
+  userId?: string;
+  userEmail?: string;
+}
+
+function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    res.status(401).json({ success: false, message: '请先登录' });
+    return;
+  }
+
+  try {
+    const token = header.slice(7);
+    const { userId, email } = authService.verifyToken(token);
+    req.userId = userId;
+    req.userEmail = email;
+    next();
+  } catch (error: any) {
+    res.status(401).json({ success: false, message: error.message });
+  }
+}
+
+// ---- Public routes ----
+
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    const { user, token } = await authService.register(email, password);
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, email: user.email, plan: user.plan }
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body;
+    const { user, token } = await authService.login(email, password);
+    res.json({
+      success: true,
+      token,
+      user: { id: user.id, email: user.email, plan: user.plan }
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// ---- Protected routes ----
+
+app.get('/api/auth/me', authMiddleware, (req: AuthRequest, res: Response) => {
+  const user = database.getUserById(req.userId!);
+  if (!user) { res.status(404).json({ success: false, message: '用户不存在' }); return; }
+
+  const assetCount = database.getAssetCountByUser(user.id);
+  const limit = PLAN_LIMITS[user.plan as UserPlan];
+
+  res.json({
+    id: user.id,
+    email: user.email,
+    plan: user.plan,
+    assetCount,
+    assetLimit: limit,
+    stripeConfigured: stripeService.isConfigured()
+  });
+});
+
+// Search (public — no auth needed for searching)
+app.get('/api/search/:type', async (req: Request, res: Response) => {
   try {
     const type = req.params.type as AssetType;
     const query = req.query.q as string || '';
@@ -36,26 +121,39 @@ app.get('/api/search/:type', async (req, res) => {
   }
 });
 
-// 获取所有监控资产
-app.get('/api/assets', (req, res) => {
-  const assets = database.getEnabledAssets();
+// Assets — protected
+app.get('/api/assets', authMiddleware, (req: AuthRequest, res: Response) => {
+  const assets = database.getAssetsByUser(req.userId!);
   res.json(assets);
 });
 
-// 添加监控资产
-app.post('/api/assets', async (req, res) => {
+app.post('/api/assets', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
+    const user = database.getUserById(req.userId!);
+    if (!user) { res.status(404).json({ success: false, message: '用户不存在' }); return; }
+
+    const limit = PLAN_LIMITS[user.plan as UserPlan];
+    const count = database.getAssetCountByUser(user.id);
+
+    if (count >= limit) {
+      res.status(403).json({
+        success: false,
+        message: `${user.plan === 'free' ? '免费' : 'Pro'}版已达上限 (${count}/${limit})，${user.plan === 'free' ? '升级 Pro 可监控 100 个指标' : '已达最大限制'}`,
+        limitReached: true
+      });
+      return;
+    }
+
     const { type, symbol, name, interval, threshold } = req.body;
     const assetInterval = interval ? interval * 1000 : undefined;
-    await monitor.addAsset(type as AssetType, symbol.toUpperCase(), name, assetInterval, threshold);
+    await monitor.addAsset(type as AssetType, symbol.toUpperCase(), name, req.userId!, assetInterval, threshold);
     res.json({ success: true, message: `已添加监控: ${name || symbol}` });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
-// 更新监控资产设置
-app.put('/api/assets/:id', (req, res) => {
+app.put('/api/assets/:id', authMiddleware, (req: AuthRequest, res: Response) => {
   try {
     const { interval, threshold } = req.body;
     const assetInterval = interval ? interval * 1000 : undefined;
@@ -66,8 +164,7 @@ app.put('/api/assets/:id', (req, res) => {
   }
 });
 
-// 删除监控资产
-app.delete('/api/assets/:id', (req, res) => {
+app.delete('/api/assets/:id', authMiddleware, (req: AuthRequest, res: Response) => {
   try {
     monitor.removeAsset(req.params.id);
     res.json({ success: true, message: `已移除监控: ${req.params.id}` });
@@ -76,27 +173,43 @@ app.delete('/api/assets/:id', (req, res) => {
   }
 });
 
-// 获取价格历史
-app.get('/api/prices/:assetId', (req, res) => {
+app.get('/api/prices/:assetId', authMiddleware, (req: AuthRequest, res: Response) => {
   const hours = parseInt(req.query.hours as string) || 24;
   const fromTimestamp = Math.floor(Date.now() / 1000) - (hours * 60 * 60);
   const prices = database.getHistoricalPrices(req.params.assetId, fromTimestamp);
   res.json(prices);
 });
 
-// 获取当前配置
-app.get('/api/config', (req, res) => {
-  // 重新读取 .env 文件以获取最新配置
+// ---- Stripe routes ----
+
+app.post('/api/stripe/checkout', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const url = await stripeService.createCheckoutSession(req.userId!, req.userEmail!);
+    res.json({ success: true, url });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/stripe/portal', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const url = await stripeService.createPortalSession(req.userId!);
+    res.json({ success: true, url });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ---- Config routes (protected) ----
+
+app.get('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
   const envPath = path.join(__dirname, '../.env');
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf-8');
     const envVars: any = {};
-
     envContent.split('\n').forEach(line => {
       const match = line.match(/^([^=]+)=(.*)$/);
-      if (match) {
-        envVars[match[1].trim()] = match[2].trim();
-      }
+      if (match) envVars[match[1].trim()] = match[2].trim();
     });
 
     res.json({
@@ -121,8 +234,7 @@ app.get('/api/config', (req, res) => {
     });
   } else {
     res.json({
-      interval: config.interval,
-      threshold: config.threshold,
+      interval: config.interval, threshold: config.threshold,
       emailEnabled: config.notifications.email?.enabled || false,
       webhookEnabled: config.notifications.webhook?.enabled || false,
       telegramEnabled: config.notifications.telegram?.enabled || false
@@ -130,22 +242,16 @@ app.get('/api/config', (req, res) => {
   }
 });
 
-// 更新配置
-app.post('/api/config', (req, res) => {
+app.post('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
   try {
     const { threshold, interval, emailConfig, webhookConfig, telegramConfig } = req.body;
-
-    // 更新 .env 文件
     const envPath = path.join(__dirname, '../.env');
     let envContent = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf-8') : '';
 
     const updateEnv = (key: string, value: string) => {
       const regex = new RegExp(`^${key}=.*$`, 'm');
-      if (regex.test(envContent)) {
-        envContent = envContent.replace(regex, `${key}=${value}`);
-      } else {
-        envContent += `\n${key}=${value}`;
-      }
+      if (regex.test(envContent)) envContent = envContent.replace(regex, `${key}=${value}`);
+      else envContent += `\n${key}=${value}`;
     };
 
     if (threshold !== undefined) updateEnv('PRICE_CHANGE_THRESHOLD', threshold.toString());
@@ -177,239 +283,104 @@ app.post('/api/config', (req, res) => {
     }
 
     fs.writeFileSync(envPath, envContent);
-
     res.json({ success: true, message: '配置已保存，请重启服务生效' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// 测试邮件通知
-app.post('/api/test/email', async (req, res) => {
+// ---- Notification test routes (protected) ----
+
+app.post('/api/test/email', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { host, port, user, pass, to } = req.body;
-
-    const testNotifier = new NotificationService({
-      email: { enabled: true, host, port, user, pass, to }
-    });
-
-    await testNotifier.sendAlert({
-      assetId: 'test',
-      assetName: '测试资产',
-      assetType: 'crypto',
-      oldPrice: 100,
-      newPrice: 105,
-      changePercent: 5,
-      timestamp: Date.now()
-    });
-
+    const testNotifier = new NotificationService({ email: { enabled: true, host, port, user, pass, to } });
+    await testNotifier.sendAlert({ assetId: 'test', assetName: '测试资产', assetType: 'crypto', oldPrice: 100, newPrice: 105, changePercent: 5, timestamp: Date.now() });
     res.json({ success: true, message: '测试邮件已发送，请检查收件箱' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: `发送失败: ${error.message}` });
   }
 });
 
-// 测试 Webhook 通知
-app.post('/api/test/webhook', async (req, res) => {
+app.post('/api/test/webhook', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { url, type } = req.body;
-
-    const testNotifier = new NotificationService({
-      webhook: { enabled: true, url, type }
-    });
-
-    await testNotifier.sendAlert({
-      assetId: 'test',
-      assetName: '测试资产',
-      assetType: 'crypto',
-      oldPrice: 100,
-      newPrice: 105,
-      changePercent: 5,
-      timestamp: Date.now()
-    });
-
+    const testNotifier = new NotificationService({ webhook: { enabled: true, url, type } });
+    await testNotifier.sendAlert({ assetId: 'test', assetName: '测试资产', assetType: 'crypto', oldPrice: 100, newPrice: 105, changePercent: 5, timestamp: Date.now() });
     res.json({ success: true, message: 'Webhook 测试消息已发送' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: `发送失败: ${error.message}` });
   }
 });
 
-// 测试 Telegram 通知
-app.post('/api/test/telegram', async (req, res) => {
+app.post('/api/test/telegram', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken, chatId, proxyHost, proxyPort } = req.body;
-
-    const testNotifier = new NotificationService({
-      telegram: {
-        enabled: true,
-        botToken,
-        chatId,
-        proxyHost: proxyHost || undefined,
-        proxyPort: proxyPort ? parseInt(proxyPort) : undefined
-      }
-    });
-
-    await testNotifier.sendAlert({
-      assetId: 'test',
-      assetName: '测试资产',
-      assetType: 'crypto',
-      oldPrice: 100,
-      newPrice: 105,
-      changePercent: 5,
-      timestamp: Date.now()
-    });
-
+    const testNotifier = new NotificationService({ telegram: { enabled: true, botToken, chatId, proxyHost: proxyHost || undefined, proxyPort: proxyPort ? parseInt(proxyPort) : undefined } });
+    await testNotifier.sendAlert({ assetId: 'test', assetName: '测试资产', assetType: 'crypto', oldPrice: 100, newPrice: 105, changePercent: 5, timestamp: Date.now() });
     res.json({ success: true, message: 'Telegram 测试消息已发送' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: `发送失败: ${error.message}` });
   }
 });
 
-// 生成 Telegram Bot 二维码
-app.post('/api/telegram/qrcode', async (req, res) => {
+app.post('/api/telegram/qrcode', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken } = req.body;
-    if (!botToken) {
-      return res.status(400).json({ success: false, message: '请提供 Bot Token' });
-    }
-
-    // 从 token 中提取 bot username
+    if (!botToken) { res.status(400).json({ success: false, message: '请提供 Bot Token' }); return; }
     const TelegramBot = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
-
-    try {
-      const botInfo = await bot.getMe();
-      const botUsername = botInfo.username;
-
-      // 生成 Telegram 深度链接
-      const deepLink = `https://t.me/${botUsername}?start=getchatid`;
-
-      // 生成二维码
-      const qrCodeDataUrl = await QRCode.toDataURL(deepLink, {
-        width: 300,
-        margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#ffffff'
-        }
-      });
-
-      res.json({
-        success: true,
-        qrCode: qrCodeDataUrl,
-        botUsername,
-        deepLink,
-        message: '请使用 Telegram 扫描二维码或点击链接'
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        message: `无法连接到 Telegram Bot: ${error.message}`
-      });
-    }
+    const botInfo = await bot.getMe();
+    const deepLink = `https://t.me/${botInfo.username}?start=getchatid`;
+    const qrCodeDataUrl = await QRCode.toDataURL(deepLink, { width: 300, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
+    res.json({ success: true, qrCode: qrCodeDataUrl, botUsername: botInfo.username, deepLink });
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      message: `生成二维码失败: ${error.message}`
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// 获取 Telegram Chat ID（轮询方式）
-app.post('/api/telegram/chatid', async (req, res) => {
+app.post('/api/telegram/chatid', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken } = req.body;
-    if (!botToken) {
-      return res.status(400).json({ success: false, message: '请提供 Bot Token' });
-    }
+    if (!botToken) { res.status(400).json({ success: false, message: '请提供 Bot Token' }); return; }
     const TelegramBot = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
-
     const updates = await bot.getUpdates({ limit: 10, timeout: 0 });
-
-    if (updates.length === 0) {
-      return res.json({
-        success: false,
-        message: '等待用户扫码...'
-      });
-    }
-
-    const latestUpdate = updates[updates.length - 1];
-    const chatId = latestUpdate.message?.chat?.id || latestUpdate.message?.from?.id;
-    const username = latestUpdate.message?.from?.username;
-    const firstName = latestUpdate.message?.from?.first_name;
-
+    if (updates.length === 0) { res.json({ success: false, message: '等待用户扫码...' }); return; }
+    const latest = updates[updates.length - 1];
+    const chatId = latest.message?.chat?.id || latest.message?.from?.id;
     if (chatId) {
-      res.json({
-        success: true,
-        chatId: chatId.toString(),
-        username: username || '未设置',
-        firstName: firstName || '未知'
-      });
+      res.json({ success: true, chatId: chatId.toString(), username: latest.message?.from?.username || '未设置', firstName: latest.message?.from?.first_name || '未知' });
     } else {
-      res.json({
-        success: false,
-        message: '等待用户扫码...'
-      });
+      res.json({ success: false, message: '等待用户扫码...' });
     }
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      message: `获取失败: ${error.message}`
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// 测试 Telegram 并获取 Chat ID（旧方法，保留兼容）
-app.post('/api/telegram/test', async (req, res) => {
+app.post('/api/telegram/test', authMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken } = req.body;
-    if (!botToken) {
-      return res.status(400).json({ success: false, message: '请提供 Bot Token' });
-    }
-
+    if (!botToken) { res.status(400).json({ success: false, message: '请提供 Bot Token' }); return; }
     const TelegramBot = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
-
-    // 获取最近的更新
     const updates = await bot.getUpdates({ limit: 10 });
-
-    if (updates.length === 0) {
-      return res.json({
-        success: false,
-        message: '未找到消息记录。请先给你的 Bot 发送 /start 命令，然后再点击测试。'
-      });
-    }
-
-    // 获取最新消息的 Chat ID
-    const latestUpdate = updates[updates.length - 1];
-    const chatId = latestUpdate.message?.chat?.id || latestUpdate.message?.from?.id;
-    const username = latestUpdate.message?.from?.username;
-    const firstName = latestUpdate.message?.from?.first_name;
-
+    if (updates.length === 0) { res.json({ success: false, message: '未找到消息记录。请先给 Bot 发送 /start' }); return; }
+    const latest = updates[updates.length - 1];
+    const chatId = latest.message?.chat?.id || latest.message?.from?.id;
     if (chatId) {
-      res.json({
-        success: true,
-        chatId: chatId.toString(),
-        username: username || '未设置',
-        firstName: firstName || '未知',
-        message: `找到你的 Chat ID: ${chatId}`
-      });
+      res.json({ success: true, chatId: chatId.toString(), username: latest.message?.from?.username || '未设置', firstName: latest.message?.from?.first_name || '未知', message: `Chat ID: ${chatId}` });
     } else {
-      res.json({
-        success: false,
-        message: '无法获取 Chat ID，请确保已给 Bot 发送过消息'
-      });
+      res.json({ success: false, message: '无法获取 Chat ID' });
     }
   } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      message: `测试失败: ${error.message}`
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
-// 启动服务
+// ---- Server startup ----
+
 async function startServer() {
   await monitor.start();
 
@@ -418,7 +389,6 @@ async function startServer() {
       console.log(`\n🌐 Web 界面已启动: http://localhost:${port}`);
       console.log(`📊 在浏览器中打开上述地址进行配置和监控\n`);
     });
-
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE' && maxRetries > 0) {
         console.warn(`⚠️ 端口 ${port} 已被占用，尝试端口 ${port + 1}...`);
@@ -433,7 +403,6 @@ async function startServer() {
   tryListen(Number(PORT));
 }
 
-// 优雅退出
 process.on('SIGINT', () => {
   console.log('\n\n👋 收到退出信号，正在关闭...');
   monitor.stop();

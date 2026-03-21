@@ -1,9 +1,10 @@
 import initSqlJs from 'sql.js';
 import type { Database as SqlJsDatabase } from 'sql.js';
 import { DATABASE_PATH } from '../config';
-import { Asset, PriceData, AssetType } from '../types';
+import { Asset, PriceData, AssetType, User, UserPlan } from '../types';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 
 let db: SqlJsDatabase;
 
@@ -15,7 +16,6 @@ async function initDatabase(): Promise<void> {
     fs.mkdirSync(dataDir, { recursive: true });
   }
 
-  // 加载或创建数据库
   if (fs.existsSync(DATABASE_PATH)) {
     const buffer = fs.readFileSync(DATABASE_PATH);
     db = new SQL.Database(buffer);
@@ -23,15 +23,30 @@ async function initDatabase(): Promise<void> {
     db = new SQL.Database();
   }
 
-  // 初始化数据库表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      plan TEXT DEFAULT 'free',
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+  `);
+
   db.run(`
     CREATE TABLE IF NOT EXISTS assets (
       id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL,
       symbol TEXT NOT NULL,
       name TEXT NOT NULL,
       enabled INTEGER DEFAULT 1,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+      interval INTEGER DEFAULT NULL,
+      threshold REAL DEFAULT NULL,
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      FOREIGN KEY (user_id) REFERENCES users(id)
     );
   `);
 
@@ -47,13 +62,10 @@ async function initDatabase(): Promise<void> {
 
   db.run(`CREATE INDEX IF NOT EXISTS idx_prices_asset_timestamp ON prices(asset_id, timestamp);`);
 
-  // 迁移：为旧数据库添加 interval/threshold 列
-  try {
-    db.run(`ALTER TABLE assets ADD COLUMN interval INTEGER DEFAULT NULL;`);
-  } catch {}
-  try {
-    db.run(`ALTER TABLE assets ADD COLUMN threshold REAL DEFAULT NULL;`);
-  } catch {}
+  // Migrations for older databases
+  try { db.run(`ALTER TABLE assets ADD COLUMN interval INTEGER DEFAULT NULL;`); } catch {}
+  try { db.run(`ALTER TABLE assets ADD COLUMN threshold REAL DEFAULT NULL;`); } catch {}
+  try { db.run(`ALTER TABLE assets ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`); } catch {}
 
   saveDatabase();
 }
@@ -68,9 +80,63 @@ export class AssetDatabase {
     await initDatabase();
   }
 
-  addAsset(id: string, type: AssetType, symbol: string, name: string, interval?: number, threshold?: number): void {
-    db.run('INSERT OR REPLACE INTO assets (id, type, symbol, name, enabled, interval, threshold) VALUES (?, ?, ?, ?, 1, ?, ?)',
-      [id, type, symbol, name, interval ?? null, threshold ?? null]);
+  // ---- User methods ----
+
+  createUser(email: string, passwordHash: string): User {
+    const id = crypto.randomUUID();
+    const now = Math.floor(Date.now() / 1000);
+    db.run('INSERT INTO users (id, email, password_hash, plan, created_at) VALUES (?, ?, ?, ?, ?)',
+      [id, email, passwordHash, 'free', now]);
+    saveDatabase();
+    return { id, email, passwordHash, plan: 'free', createdAt: now };
+  }
+
+  getUserByEmail(email: string): User | undefined {
+    const result = db.exec('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at FROM users WHERE email = ?', [email]);
+    if (result.length === 0 || result[0].values.length === 0) return undefined;
+    return this.rowToUser(result[0].values[0]);
+  }
+
+  getUserById(id: string): User | undefined {
+    const result = db.exec('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at FROM users WHERE id = ?', [id]);
+    if (result.length === 0 || result[0].values.length === 0) return undefined;
+    return this.rowToUser(result[0].values[0]);
+  }
+
+  updateUserPlan(userId: string, plan: UserPlan, stripeCustomerId?: string, stripeSubscriptionId?: string): void {
+    db.run('UPDATE users SET plan = ?, stripe_customer_id = ?, stripe_subscription_id = ? WHERE id = ?',
+      [plan, stripeCustomerId ?? null, stripeSubscriptionId ?? null, userId]);
+    saveDatabase();
+  }
+
+  updateStripeCustomer(userId: string, stripeCustomerId: string): void {
+    db.run('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [stripeCustomerId, userId]);
+    saveDatabase();
+  }
+
+  getUserByStripeCustomerId(customerId: string): User | undefined {
+    const result = db.exec('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at FROM users WHERE stripe_customer_id = ?', [customerId]);
+    if (result.length === 0 || result[0].values.length === 0) return undefined;
+    return this.rowToUser(result[0].values[0]);
+  }
+
+  private rowToUser(row: any[]): User {
+    return {
+      id: row[0] as string,
+      email: row[1] as string,
+      passwordHash: row[2] as string,
+      plan: row[3] as UserPlan,
+      stripeCustomerId: (row[4] as string) || undefined,
+      stripeSubscriptionId: (row[5] as string) || undefined,
+      createdAt: row[6] as number
+    };
+  }
+
+  // ---- Asset methods ----
+
+  addAsset(id: string, userId: string, type: AssetType, symbol: string, name: string, interval?: number, threshold?: number): void {
+    db.run('INSERT OR REPLACE INTO assets (id, user_id, type, symbol, name, enabled, interval, threshold) VALUES (?, ?, ?, ?, ?, 1, ?, ?)',
+      [id, userId, type, symbol, name, interval ?? null, threshold ?? null]);
     saveDatabase();
   }
 
@@ -80,64 +146,66 @@ export class AssetDatabase {
     saveDatabase();
   }
 
-  // 移除监控资产
   removeAsset(id: string): void {
     db.run('UPDATE assets SET enabled = 0 WHERE id = ?', [id]);
     saveDatabase();
   }
 
-  // 获取所有启用的资产
   getEnabledAssets(): Asset[] {
-    const result = db.exec('SELECT id, type, symbol, name, enabled, interval, threshold FROM assets WHERE enabled = 1');
+    const result = db.exec('SELECT id, user_id, type, symbol, name, enabled, interval, threshold FROM assets WHERE enabled = 1');
     if (result.length === 0) return [];
-
-    const rows = result[0];
-    return rows.values.map((row: any[]) => ({
-      id: row[0] as string,
-      type: row[1] as AssetType,
-      symbol: row[2] as string,
-      name: row[3] as string,
-      enabled: row[4] === 1,
-      interval: row[5] as number | undefined,
-      threshold: row[6] as number | undefined
-    }));
+    return result[0].values.map((row: any[]) => this.rowToAsset(row));
   }
 
-  // 保存价格数据
+  getAssetsByUser(userId: string): Asset[] {
+    const result = db.exec('SELECT id, user_id, type, symbol, name, enabled, interval, threshold FROM assets WHERE user_id = ? AND enabled = 1', [userId]);
+    if (result.length === 0) return [];
+    return result[0].values.map((row: any[]) => this.rowToAsset(row));
+  }
+
+  getAssetCountByUser(userId: string): number {
+    const result = db.exec('SELECT COUNT(*) FROM assets WHERE user_id = ? AND enabled = 1', [userId]);
+    if (result.length === 0) return 0;
+    return result[0].values[0][0] as number;
+  }
+
+  private rowToAsset(row: any[]): Asset {
+    return {
+      id: row[0] as string,
+      userId: row[1] as string,
+      type: row[2] as AssetType,
+      symbol: row[3] as string,
+      name: row[4] as string,
+      enabled: row[5] === 1,
+      interval: row[6] as number | undefined,
+      threshold: row[7] as number | undefined
+    };
+  }
+
+  // ---- Price methods ----
+
   savePrice(data: PriceData): void {
     db.run('INSERT INTO prices (asset_id, price, timestamp) VALUES (?, ?, ?)',
       [data.assetId, data.price, data.timestamp]);
     saveDatabase();
   }
 
-  // 获取最新价格
   getLatestPrice(assetId: string): PriceData | undefined {
     const result = db.exec('SELECT asset_id, price, timestamp FROM prices WHERE asset_id = ? ORDER BY timestamp DESC LIMIT 1', [assetId]);
     if (result.length === 0 || result[0].values.length === 0) return undefined;
-
     const row = result[0].values[0];
-    return {
-      assetId: row[0] as string,
-      price: row[1] as number,
-      timestamp: row[2] as number
-    };
+    return { assetId: row[0] as string, price: row[1] as number, timestamp: row[2] as number };
   }
 
-  // 获取历史价格
   getHistoricalPrices(assetId: string, fromTimestamp: number): PriceData[] {
     const result = db.exec('SELECT asset_id, price, timestamp FROM prices WHERE asset_id = ? AND timestamp >= ? ORDER BY timestamp ASC',
       [assetId, fromTimestamp]);
     if (result.length === 0) return [];
-
-    const rows = result[0];
-    return rows.values.map((row: any[]) => ({
-      assetId: row[0] as string,
-      price: row[1] as number,
-      timestamp: row[2] as number
+    return result[0].values.map((row: any[]) => ({
+      assetId: row[0] as string, price: row[1] as number, timestamp: row[2] as number
     }));
   }
 
-  // 清理旧数据（保留最近30天）
   cleanOldData(): void {
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
     db.run('DELETE FROM prices WHERE timestamp < ?', [thirtyDaysAgo]);

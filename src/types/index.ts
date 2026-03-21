@@ -1,13 +1,30 @@
 export type AssetType = 'crypto' | 'stock' | 'metal' | 'forex';
+export type UserPlan = 'free' | 'pro';
+
+export const PLAN_LIMITS: Record<UserPlan, number> = {
+  free: 10,
+  pro: 100
+};
+
+export interface User {
+  id: string;
+  email: string;
+  passwordHash: string;
+  plan: UserPlan;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
+  createdAt: number;
+}
 
 export interface Asset {
   id: string;
+  userId: string;
   type: AssetType;
   symbol: string;
   name: string;
   enabled: boolean;
-  interval?: number;   // 独立监控间隔（毫秒），null 则用全局
-  threshold?: number;  // 独立涨跌幅阈值（%），null 则用全局
+  interval?: number;
+  threshold?: number;
 }
 
 export interface PriceData {
