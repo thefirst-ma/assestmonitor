@@ -37,3 +37,9 @@ export const config: MonitorConfig = {
 };
 
 export const DATABASE_PATH = process.env.DATABASE_PATH || './data/crypto.db';
+
+/** 涨跌幅计算回看窗口（秒）：与窗口内最高价/最低价比较，避免「分多步下跌每步都小于阈值」导致漏报 */
+export const PRICE_ALERT_LOOKBACK_SECONDS = parseInt(process.env.PRICE_ALERT_LOOKBACK_SECONDS || '3600', 10);
+
+/** 同一资产两次通知之间的最短间隔（秒），0 表示不限制 */
+export const ALERT_COOLDOWN_SECONDS = parseInt(process.env.ALERT_COOLDOWN_SECONDS || '300', 10);
