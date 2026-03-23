@@ -253,33 +253,34 @@ app.post('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
       if (regex.test(envContent)) envContent = envContent.replace(regex, `${key}=${value}`);
       else envContent += `\n${key}=${value}`;
     };
+    const hasOwn = (obj: any, key: string) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
     if (threshold !== undefined) updateEnv('PRICE_CHANGE_THRESHOLD', threshold.toString());
     if (interval !== undefined) updateEnv('MONITOR_INTERVAL', interval.toString());
 
     if (emailConfig) {
-      updateEnv('EMAIL_ENABLED', emailConfig.enabled ? 'true' : 'false');
-      if (emailConfig.host) updateEnv('EMAIL_HOST', emailConfig.host);
-      if (emailConfig.port) updateEnv('EMAIL_PORT', emailConfig.port.toString());
-      if (emailConfig.user) updateEnv('EMAIL_USER', emailConfig.user);
-      if (emailConfig.pass) updateEnv('EMAIL_PASS', emailConfig.pass);
-      if (emailConfig.to) updateEnv('EMAIL_TO', emailConfig.to);
+      if (hasOwn(emailConfig, 'enabled')) updateEnv('EMAIL_ENABLED', emailConfig.enabled ? 'true' : 'false');
+      if (hasOwn(emailConfig, 'host') && emailConfig.host) updateEnv('EMAIL_HOST', emailConfig.host);
+      if (hasOwn(emailConfig, 'port') && emailConfig.port) updateEnv('EMAIL_PORT', emailConfig.port.toString());
+      if (hasOwn(emailConfig, 'user') && emailConfig.user) updateEnv('EMAIL_USER', emailConfig.user);
+      if (hasOwn(emailConfig, 'pass') && emailConfig.pass) updateEnv('EMAIL_PASS', emailConfig.pass);
+      if (hasOwn(emailConfig, 'to') && emailConfig.to) updateEnv('EMAIL_TO', emailConfig.to);
     }
 
     const isNotMasked = (val: string) => val && !val.startsWith('****');
 
     if (webhookConfig) {
-      updateEnv('WEBHOOK_ENABLED', webhookConfig.enabled ? 'true' : 'false');
-      if (isNotMasked(webhookConfig.url)) updateEnv('WEBHOOK_URL', webhookConfig.url);
-      if (webhookConfig.type) updateEnv('WEBHOOK_TYPE', webhookConfig.type);
+      if (hasOwn(webhookConfig, 'enabled')) updateEnv('WEBHOOK_ENABLED', webhookConfig.enabled ? 'true' : 'false');
+      if (hasOwn(webhookConfig, 'url') && isNotMasked(webhookConfig.url)) updateEnv('WEBHOOK_URL', webhookConfig.url);
+      if (hasOwn(webhookConfig, 'type') && webhookConfig.type) updateEnv('WEBHOOK_TYPE', webhookConfig.type);
     }
 
     if (telegramConfig) {
-      updateEnv('TELEGRAM_ENABLED', telegramConfig.enabled ? 'true' : 'false');
-      if (isNotMasked(telegramConfig.botToken)) updateEnv('TELEGRAM_BOT_TOKEN', telegramConfig.botToken);
-      if (isNotMasked(telegramConfig.chatId)) updateEnv('TELEGRAM_CHAT_ID', telegramConfig.chatId);
-      if (telegramConfig.proxyHost) updateEnv('TELEGRAM_PROXY_HOST', telegramConfig.proxyHost);
-      if (telegramConfig.proxyPort) updateEnv('TELEGRAM_PROXY_PORT', telegramConfig.proxyPort.toString());
+      if (hasOwn(telegramConfig, 'enabled')) updateEnv('TELEGRAM_ENABLED', telegramConfig.enabled ? 'true' : 'false');
+      if (hasOwn(telegramConfig, 'botToken') && isNotMasked(telegramConfig.botToken)) updateEnv('TELEGRAM_BOT_TOKEN', telegramConfig.botToken);
+      if (hasOwn(telegramConfig, 'chatId') && isNotMasked(telegramConfig.chatId)) updateEnv('TELEGRAM_CHAT_ID', telegramConfig.chatId);
+      if (hasOwn(telegramConfig, 'proxyHost') && telegramConfig.proxyHost) updateEnv('TELEGRAM_PROXY_HOST', telegramConfig.proxyHost);
+      if (hasOwn(telegramConfig, 'proxyPort') && telegramConfig.proxyPort) updateEnv('TELEGRAM_PROXY_PORT', telegramConfig.proxyPort.toString());
     }
 
     fs.writeFileSync(envPath, envContent);

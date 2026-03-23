@@ -71,7 +71,8 @@ export class InvestmentMonitor {
   }
 
   private async checkGroup(assets: Asset[]): Promise<void> {
-    console.log(`\n🔍 [${new Date().toLocaleString('zh-CN')}] 检查 ${assets.length} 个资产...`);
+    const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    console.log(`\n🔍 [${ts}] 检查 ${assets.length} 个资产...`);
     const timestamp = Math.floor(Date.now() / 1000);
 
     for (const asset of assets) {

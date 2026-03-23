@@ -61,7 +61,7 @@ export class NotificationService {
            `原价格: $${alert.oldPrice.toFixed(2)}\n` +
            `当前价格: $${alert.newPrice.toFixed(2)}\n` +
            `涨跌幅: ${alert.changePercent > 0 ? '+' : ''}${alert.changePercent.toFixed(2)}%\n` +
-           `时间: ${new Date(alert.timestamp).toLocaleString('zh-CN')}`;
+           `时间: ${new Date(alert.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })} (北京时间)`;
   }
 
   private async sendEmail(message: string, alert: PriceAlert): Promise<void> {
@@ -142,9 +142,13 @@ export class NotificationService {
     try {
       // 纯文本警报，勿用 HTML 模式：资产名等若含 & < > 会导致 API 拒收且无直观报错
       await this.telegramBot.sendMessage(this.config.telegram.chatId, message);
-      console.log(`📱 Telegram通知已发送: ${alert.assetName}`);
+      const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+      console.log(`📱 Telegram通知已发送: ${alert.assetName} [${ts}]`);
     } catch (error) {
-      console.error('Telegram发送失败:', error);
+      const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+      const anyErr: any = error;
+      const status = anyErr?.response?.status;
+      console.error(`Telegram发送失败: ${alert.assetName} [${ts}]${status ? ` (status ${status})` : ''}:`, anyErr?.message || anyErr);
     }
   }
 }
