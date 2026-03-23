@@ -7,18 +7,23 @@ export class NotificationService {
   private telegramBot?: TelegramBot;
 
   constructor(private config: NotificationConfig) {
-    if (this.config.telegram?.enabled && this.config.telegram.botToken) {
-      const botOptions: any = { polling: false };
+    if (this.config.telegram?.enabled) {
+      if (!this.config.telegram.botToken?.trim()) {
+        console.error('⚠️ TELEGRAM_ENABLED=true 但未配置 TELEGRAM_BOT_TOKEN，警报无法发到 Telegram');
+      } else if (!String(this.config.telegram.chatId ?? '').trim()) {
+        console.error('⚠️ TELEGRAM_ENABLED=true 但未配置 TELEGRAM_CHAT_ID，警报无法发到 Telegram');
+      } else {
+        const botOptions: any = { polling: false };
 
-      // 配置代理
-      if (this.config.telegram.proxyHost && this.config.telegram.proxyPort) {
-        botOptions.request = {
-          proxy: `http://${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`
-        };
-        console.log(`📡 Telegram 使用代理: ${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`);
+        if (this.config.telegram.proxyHost && this.config.telegram.proxyPort) {
+          botOptions.request = {
+            proxy: `http://${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`
+          };
+          console.log(`📡 Telegram 使用代理: ${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`);
+        }
+
+        this.telegramBot = new TelegramBot(this.config.telegram.botToken, botOptions);
       }
-
-      this.telegramBot = new TelegramBot(this.config.telegram.botToken, botOptions);
     }
   }
 
@@ -128,12 +133,15 @@ export class NotificationService {
   }
 
   private async sendTelegram(message: string, alert: PriceAlert): Promise<void> {
-    if (!this.config.telegram || !this.telegramBot) return;
+    if (!this.config.telegram) return;
+    if (!this.telegramBot) {
+      console.error(`📱 Telegram 未初始化，跳过发送（检查 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID）: ${alert.assetName}`);
+      return;
+    }
 
     try {
-      await this.telegramBot.sendMessage(this.config.telegram.chatId, message, {
-        parse_mode: 'HTML'
-      });
+      // 纯文本警报，勿用 HTML 模式：资产名等若含 & < > 会导致 API 拒收且无直观报错
+      await this.telegramBot.sendMessage(this.config.telegram.chatId, message);
       console.log(`📱 Telegram通知已发送: ${alert.assetName}`);
     } catch (error) {
       console.error('Telegram发送失败:', error);
