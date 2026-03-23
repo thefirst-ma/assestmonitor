@@ -474,7 +474,11 @@ class YahooFinanceProvider implements PriceProvider {
           name: `${item.longname || item.shortname || item.symbol} (${item.exchDisp || item.exchange || ''})`
         }));
     } catch (error) {
-      console.error('Yahoo Finance 搜索失败:', error);
+      const err: any = error;
+      const status = err?.response?.status;
+      const msg = err?.message || 'Unknown error';
+      // 这是“搜索接口”失败，不影响监控推送；避免打印整个 axios error 对象刷满日志。
+      console.error(`Yahoo Finance 搜索失败: status=${status ?? 'unknown'} msg=${msg} query="${query}"`);
       return [];
     }
   }
