@@ -206,6 +206,22 @@ export class AssetDatabase {
     }));
   }
 
+  /** 最近 N 条价格（按时间升序），用于长监控间隔时窗口内采样不足的回退 */
+  getLastNPrices(assetId: string, n: number): PriceData[] {
+    const result = db.exec(
+      'SELECT asset_id, price, timestamp FROM prices WHERE asset_id = ? ORDER BY timestamp DESC LIMIT ?',
+      [assetId, n]
+    );
+    if (result.length === 0 || result[0].values.length === 0) return [];
+    const rows = result[0].values.map((row: any[]) => ({
+      assetId: row[0] as string,
+      price: row[1] as number,
+      timestamp: row[2] as number
+    }));
+    rows.reverse();
+    return rows;
+  }
+
   cleanOldData(): void {
     const thirtyDaysAgo = Math.floor(Date.now() / 1000) - (30 * 24 * 60 * 60);
     db.run('DELETE FROM prices WHERE timestamp < ?', [thirtyDaysAgo]);

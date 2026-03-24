@@ -8,8 +8,10 @@ export class InvestmentMonitor {
   private notifier: NotificationService;
   private timers: Map<string, NodeJS.Timeout> = new Map();
   private running = false;
-  /** 上次对该资产发出通知的时间（毫秒），用于冷却避免刷屏 */
+  /** 上次对该「逻辑标的」发出通知的时间（毫秒），用于冷却；加密货币按规范化交易对合并，避免 ETH 重复推送 */
   private lastAlertAt: Map<string, number> = new Map();
+  /** 本轮 checkGroup 内已告警过的逻辑键，同一轮内同一标的只推一条（即使冷却为 0） */
+  private alertRoundKeys: Set<string> = new Set();
 
   constructor() {
     this.notifier = new NotificationService(config.notifications);
@@ -91,9 +93,21 @@ export class InvestmentMonitor {
 
         // 窗口内最高/最低价：捕捉「短时间内累计涨跌超过阈值」而相邻两次采样每步都偏小的情况
         const fromTs = timestamp - PRICE_ALERT_LOOKBACK_SECONDS;
-        const hist = database.getHistoricalPrices(asset.id, fromTs);
+        let hist = database.getHistoricalPrices(asset.id, fromTs);
+        let windowLabel = `近${PRICE_ALERT_LOOKBACK_SECONDS}s`;
+        // 长监控间隔时，回看时间内往往只有 0～1 个点，窗口高低退化为「仅上次价」，窗口类条件永远不触发。
+        // 回退：用最近若干条历史采样构造高低区间（仍与当前价比较）。
+        if (hist.length < 2) {
+          const tail = database.getLastNPrices(asset.id, 120);
+          if (tail.length >= 2) {
+            hist = tail;
+            windowLabel = `最近${tail.length}次采样`;
+          }
+        }
         const windowPrices = hist.map(h => h.price);
-        windowPrices.push(lastPrice.price);
+        if (!hist.some(h => h.timestamp === lastPrice.timestamp && h.price === lastPrice.price)) {
+          windowPrices.push(lastPrice.price);
+        }
         const maxInWindow = Math.max(...windowPrices);
         const minInWindow = Math.min(...windowPrices);
 
@@ -117,27 +131,32 @@ export class InvestmentMonitor {
         if (shouldAlert) {
           const candidates: Array<{ old: number; ch: number; r: string }> = [];
           if (hitConsecutive) candidates.push({ old: lastPrice.price, ch: changeConsecutive, r: '相邻采样' });
-          if (hitDropWindow) candidates.push({ old: maxInWindow, ch: chFromPeak, r: `窗口回落(近${PRICE_ALERT_LOOKBACK_SECONDS}s最高)` });
-          if (hitRiseWindow) candidates.push({ old: minInWindow, ch: chFromTrough, r: `窗口反弹(近${PRICE_ALERT_LOOKBACK_SECONDS}s最低)` });
+          if (hitDropWindow) candidates.push({ old: maxInWindow, ch: chFromPeak, r: `窗口回落(${windowLabel}最高)` });
+          if (hitRiseWindow) candidates.push({ old: minInWindow, ch: chFromTrough, r: `窗口反弹(${windowLabel}最低)` });
           const best = candidates.reduce((a, b) => (Math.abs(b.ch) > Math.abs(a.ch) ? b : a));
           alertOld = best.old;
           alertChange = best.ch;
           reason = best.r;
         }
 
+        const dedupeKey = this.alertDedupeKey(asset);
         const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
-        const lastAt = this.lastAlertAt.get(asset.id) || 0;
+        const lastAt = this.lastAlertAt.get(dedupeKey) || 0;
         if (shouldAlert && cooldownMs > 0 && Date.now() - lastAt < cooldownMs) {
           shouldAlert = false;
         }
+        if (shouldAlert && this.alertRoundKeys.has(dedupeKey)) {
+          shouldAlert = false;
+        }
 
-        const extra = ` 邻次${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}% | 近${PRICE_ALERT_LOOKBACK_SECONDS}s 高$${maxInWindow.toFixed(2)} 低$${minInWindow.toFixed(2)}`;
+        const extra = ` 邻次${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}% | ${windowLabel} 高$${maxInWindow.toFixed(2)} 低$${minInWindow.toFixed(2)}`;
         console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}%) [阈值:${threshold}%]${extra}`);
 
         database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
 
         if (shouldAlert) {
-          this.lastAlertAt.set(asset.id, Date.now());
+          this.alertRoundKeys.add(dedupeKey);
+          this.lastAlertAt.set(dedupeKey, Date.now());
           const alert: PriceAlert = {
             assetId: asset.id,
             assetName: asset.name,
@@ -154,6 +173,16 @@ export class InvestmentMonitor {
         console.error(`❌ ${asset.name} 价格获取失败:`, error.message);
       }
     }
+  }
+
+  /** 同一用户下相同加密货币交易对（ETHUSDT / ETH-USDT / ETH/USDT）合并为一条告警 */
+  private alertDedupeKey(asset: Asset): string {
+    const uid = asset.userId || '';
+    if (asset.type === 'crypto') {
+      const canon = asset.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return `${uid}:crypto:${canon}`;
+    }
+    return `${uid}:${asset.type}:${asset.symbol.toUpperCase()}`;
   }
 
   private getTypeEmoji(type: AssetType): string {
