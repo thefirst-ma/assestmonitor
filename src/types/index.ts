@@ -37,6 +37,8 @@ export interface PriceAlert {
   assetId: string;
   assetName: string;
   assetType: AssetType;
+  /** 展示用，合并 Telegram 时作为标的标识 */
+  symbol?: string;
   oldPrice: number;
   newPrice: number;
   changePercent: number;

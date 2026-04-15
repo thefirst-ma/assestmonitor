@@ -12,6 +12,8 @@ export class InvestmentMonitor {
   private lastAlertAt: Map<string, number> = new Map();
   /** 本轮 checkGroup 内已告警过的逻辑键，同一轮内同一标的只推一条（即使冷却为 0） */
   private alertRoundKeys: Set<string> = new Set();
+  /** 告警后忽略该时间戳之前的采样参与窗口高/低计算，避免旧峰值/谷底在冷却结束后反复触发同类告警 */
+  private alertWindowFloorSec: Map<string, number> = new Map();
 
   constructor() {
     this.notifier = new NotificationService(config.notifications);
@@ -76,11 +78,20 @@ export class InvestmentMonitor {
     const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     console.log(`\n🔍 [${ts}] 检查 ${assets.length} 个资产...`);
     const timestamp = Math.floor(Date.now() / 1000);
+    this.alertRoundKeys.clear();
+    const priceCache = new Map<string, number>();
+    /** 跨用户、同 type+symbol 合并为一条 Telegram */
+    const telegramMergeBatch = new Map<string, PriceAlert[]>();
 
     for (const asset of assets) {
       try {
         const lastPrice = database.getLatestPrice(asset.id);
-        const currentPrice = await priceService.getPrice(asset.type, asset.symbol);
+        const cacheKey = `${asset.type}:${asset.symbol}`;
+        let currentPrice = priceCache.get(cacheKey);
+        if (currentPrice === undefined) {
+          currentPrice = await priceService.getPrice(asset.type, asset.symbol);
+          priceCache.set(cacheKey, currentPrice);
+        }
 
         const emoji = this.getTypeEmoji(asset.type);
         const threshold = asset.threshold ?? config.threshold;
@@ -92,13 +103,14 @@ export class InvestmentMonitor {
         }
 
         // 窗口内最高/最低价：捕捉「短时间内累计涨跌超过阈值」而相邻两次采样每步都偏小的情况
-        const fromTs = timestamp - PRICE_ALERT_LOOKBACK_SECONDS;
+        const floorSec = this.alertWindowFloorSec.get(asset.id) ?? 0;
+        const fromTs = Math.max(timestamp - PRICE_ALERT_LOOKBACK_SECONDS, floorSec);
         let hist = database.getHistoricalPrices(asset.id, fromTs);
         let windowLabel = `近${PRICE_ALERT_LOOKBACK_SECONDS}s`;
         // 长监控间隔时，回看时间内往往只有 0～1 个点，窗口高低退化为「仅上次价」，窗口类条件永远不触发。
         // 回退：用最近若干条历史采样构造高低区间（仍与当前价比较）。
         if (hist.length < 2) {
-          const tail = database.getLastNPrices(asset.id, 120);
+          const tail = database.getLastNPrices(asset.id, 120).filter(h => h.timestamp >= floorSec);
           if (tail.length >= 2) {
             hist = tail;
             windowLabel = `最近${tail.length}次采样`;
@@ -161,18 +173,37 @@ export class InvestmentMonitor {
             assetId: asset.id,
             assetName: asset.name,
             assetType: asset.type,
+            symbol: asset.symbol,
             oldPrice: alertOld,
             newPrice: currentPrice,
             changePercent: alertChange,
             timestamp: Date.now()
           };
           console.log(`  🔔 触发通知 (${reason}): ${alertChange > 0 ? '+' : ''}${alertChange.toFixed(2)}%`);
-          await this.notifier.sendAlert(alert);
+          await this.notifier.sendAlertWithoutTelegram(alert);
+          const mergeKey = this.sharedChannelDedupeKey(asset);
+          if (!telegramMergeBatch.has(mergeKey)) telegramMergeBatch.set(mergeKey, []);
+          telegramMergeBatch.get(mergeKey)!.push(alert);
+          // 通知后窗口基准前移：后续高/低仅基于本次告警之后的采样，避免同一历史峰/谷在冷却结束后再次满足「窗口回落/反弹」
+          this.alertWindowFloorSec.set(asset.id, timestamp);
         }
       } catch (error: any) {
         console.error(`❌ ${asset.name} 价格获取失败:`, error.message);
       }
     }
+
+    for (const merged of telegramMergeBatch.values()) {
+      await this.notifier.sendTelegramMerged(merged);
+    }
+  }
+
+  /** 全局同标的（不含 userId）：用于单一 Telegram 渠道合并推送 */
+  private sharedChannelDedupeKey(asset: Asset): string {
+    if (asset.type === 'crypto') {
+      const canon = asset.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      return `crypto:${canon}`;
+    }
+    return `${asset.type}:${asset.symbol.toUpperCase()}`;
   }
 
   /** 同一用户下相同加密货币交易对（ETHUSDT / ETH-USDT / ETH/USDT）合并为一条告警 */

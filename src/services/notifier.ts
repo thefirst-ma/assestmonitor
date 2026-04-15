@@ -28,23 +28,69 @@ export class NotificationService {
   }
 
   async sendAlert(alert: PriceAlert): Promise<void> {
-    const message = this.formatMessage(alert);
+    await Promise.allSettled([
+      this.sendEmailForAlert(alert),
+      this.sendWebhookForAlert(alert),
+      this.sendTelegramText(this.formatMessage(alert), alert.assetName)
+    ]);
+  }
 
-    const promises: Promise<void>[] = [];
+  /** 邮件 + Webhook（同一轮内多用户同标的时，Telegram 由 sendTelegramMerged 单独发） */
+  async sendAlertWithoutTelegram(alert: PriceAlert): Promise<void> {
+    await Promise.allSettled([this.sendEmailForAlert(alert), this.sendWebhookForAlert(alert)]);
+  }
 
-    if (this.config.email?.enabled) {
-      promises.push(this.sendEmail(message, alert));
-    }
+  /** 同一渠道、同一逻辑标的合并为一条 Telegram（单条时与原先单条格式一致） */
+  async sendTelegramMerged(alerts: PriceAlert[]): Promise<void> {
+    if (!this.config.telegram?.enabled || alerts.length === 0) return;
+    const text =
+      alerts.length === 1 ? this.formatMessage(alerts[0]) : this.formatMergedTelegramMessage(alerts);
+    const label =
+      alerts.length === 1
+        ? alerts[0].assetName
+        : `${alerts[0].symbol || alerts[0].assetName} 等${alerts.length}项`;
+    await this.sendTelegramText(text, label);
+  }
 
-    if (this.config.webhook?.enabled) {
-      promises.push(this.sendWebhook(message, alert));
-    }
+  private async sendEmailForAlert(alert: PriceAlert): Promise<void> {
+    if (!this.config.email?.enabled) return;
+    await this.sendEmail(this.formatMessage(alert), alert);
+  }
 
-    if (this.config.telegram?.enabled) {
-      promises.push(this.sendTelegram(message, alert));
-    }
+  private async sendWebhookForAlert(alert: PriceAlert): Promise<void> {
+    if (!this.config.webhook?.enabled) return;
+    await this.sendWebhook(this.formatMessage(alert), alert);
+  }
 
-    await Promise.allSettled(promises);
+  private formatMergedTelegramMessage(alerts: PriceAlert[]): string {
+    const typeNames: Record<string, string> = {
+      crypto: '加密货币',
+      stock: '股票',
+      metal: '贵金属',
+      forex: '外汇'
+    };
+    const t = alerts[0].assetType;
+    const typeLabel = typeNames[t] || '资产';
+    const sym = (alerts[0].symbol || alerts[0].assetName).toUpperCase();
+    const up = alerts.filter(a => a.changePercent > 0).length;
+    const down = alerts.filter(a => a.changePercent < 0).length;
+    const emoji = up && down ? '📊' : up ? '📈' : '📉';
+    const ts = new Date(alerts[0].timestamp).toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour12: false
+    });
+    const newPrice = alerts[0].newPrice;
+    const lines = alerts.map(a => {
+      const dir = a.changePercent > 0 ? '上涨' : a.changePercent < 0 ? '下跌' : '变动';
+      const pct = `${a.changePercent > 0 ? '+' : ''}${a.changePercent.toFixed(2)}%`;
+      return `• 「${a.assetName}」${dir} ${pct}\n  参考价 $${a.oldPrice.toFixed(2)} → 当前 $${a.newPrice.toFixed(2)}`;
+    });
+    return (
+      `${emoji} ${typeLabel} ${sym} 价格警报（合并 ${alerts.length} 个监控）\n\n` +
+      `当前价: $${newPrice.toFixed(2)}\n\n` +
+      `${lines.join('\n\n')}\n\n` +
+      `时间: ${ts} (北京时间)`
+    );
   }
 
   private formatMessage(alert: PriceAlert): string {
@@ -132,10 +178,10 @@ export class NotificationService {
     }
   }
 
-  private async sendTelegram(message: string, alert: PriceAlert): Promise<void> {
+  private async sendTelegramText(message: string, logLabel: string): Promise<void> {
     if (!this.config.telegram) return;
     if (!this.telegramBot) {
-      console.error(`📱 Telegram 未初始化，跳过发送（检查 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID）: ${alert.assetName}`);
+      console.error(`📱 Telegram 未初始化，跳过发送（检查 TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID）: ${logLabel}`);
       return;
     }
 
@@ -143,12 +189,12 @@ export class NotificationService {
       // 纯文本警报，勿用 HTML 模式：资产名等若含 & < > 会导致 API 拒收且无直观报错
       await this.telegramBot.sendMessage(this.config.telegram.chatId, message);
       const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
-      console.log(`📱 Telegram通知已发送: ${alert.assetName} [${ts}]`);
+      console.log(`📱 Telegram通知已发送: ${logLabel} [${ts}]`);
     } catch (error) {
       const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
       const anyErr: any = error;
       const status = anyErr?.response?.status;
-      console.error(`Telegram发送失败: ${alert.assetName} [${ts}]${status ? ` (status ${status})` : ''}:`, anyErr?.message || anyErr);
+      console.error(`Telegram发送失败: ${logLabel} [${ts}]${status ? ` (status ${status})` : ''}:`, anyErr?.message || anyErr);
     }
   }
 }
