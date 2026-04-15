@@ -53,15 +53,8 @@ export interface PriceProvider {
   ): Promise<Array<{ symbol: string; name: string }>>;
 }
 
-// 加密货币 - Binance 优先，OKX 备用
+// 加密货币 - OKX 优先，Binance 备用
 class CryptoProvider implements PriceProvider {
-  /** Binance /api/v3/exchangeInfo 解析结果缓存，减轻搜索时重复拉全量交易规则 */
-  private binanceSpotSymbolsCache: {
-    list: Array<{ symbol: string; base: string; quote: string }>;
-    at: number;
-  } | null = null;
-  private static readonly BINANCE_EXCHANGE_INFO_TTL_MS = 5 * 60 * 1000;
-
   private readonly commonCryptos = [
     { symbol: "BTCUSDT", name: "Bitcoin/USDT" },
     { symbol: "ETHUSDT", name: "Ethereum/USDT" },
@@ -94,34 +87,30 @@ class CryptoProvider implements PriceProvider {
   }
 
   async getPrice(symbol: string): Promise<number> {
-    const sym = symbol.toUpperCase();
+    // OKX (国内直连)
     try {
-      const data = await requestWithRetry<{ price: string }>(
+      const instId = this.toOkxInstId(symbol);
+      const data = await requestWithRetry<any>(
         {
-          url: "https://api.binance.com/api/v3/ticker/price",
-          params: { symbol: sym },
+          url: "https://www.okx.com/api/v5/market/ticker",
+          params: { instId },
           timeout: 15000,
         },
         2,
         1000,
       );
-      return parseFloat(data.price);
+      if (data?.data?.[0]?.last) return parseFloat(data.data[0].last);
     } catch (e: any) {
-      console.warn(`Binance 获取失败，尝试 OKX: ${e.message}`);
+      console.warn(`OKX 获取失败，尝试 Binance: ${e.message}`);
     }
 
-    const instId = this.toOkxInstId(sym);
-    const data = await requestWithRetry<any>(
-      {
-        url: "https://www.okx.com/api/v5/market/ticker",
-        params: { instId },
-        timeout: 15000,
-      },
-      2,
-      1000,
-    );
-    if (data?.data?.[0]?.last) return parseFloat(data.data[0].last);
-    throw new Error(`无法获取价格: ${sym}`);
+    // Binance 备用
+    const data = await requestWithRetry<{ price: string }>({
+      url: "https://api.binance.com/api/v3/ticker/price",
+      params: { symbol },
+      timeout: 15000,
+    });
+    return parseFloat(data.price);
   }
 
   async validateSymbol(symbol: string): Promise<boolean> {
@@ -133,80 +122,10 @@ class CryptoProvider implements PriceProvider {
     }
   }
 
-  private isBinanceSpotTrading(s: {
-    status: string;
-    permissions?: string[];
-  }): boolean {
-    if (s.status !== "TRADING") return false;
-    if (s.permissions && s.permissions.length > 0)
-      return s.permissions.includes("SPOT");
-    return true;
-  }
-
-  private async getBinanceSpotSymbolIndex(): Promise<
-    Array<{ symbol: string; base: string; quote: string }>
-  > {
-    const now = Date.now();
-    if (
-      this.binanceSpotSymbolsCache &&
-      now - this.binanceSpotSymbolsCache.at <
-        CryptoProvider.BINANCE_EXCHANGE_INFO_TTL_MS
-    ) {
-      return this.binanceSpotSymbolsCache.list;
-    }
-    const data = await requestWithRetry<{
-      symbols: Array<{
-        symbol: string;
-        baseAsset: string;
-        quoteAsset: string;
-        status: string;
-        permissions?: string[];
-      }>;
-    }>(
-      {
-        url: "https://api.binance.com/api/v3/exchangeInfo",
-        timeout: 30000,
-      },
-      2,
-      1000,
-    );
-    const list = (data.symbols || [])
-      .filter((s) => this.isBinanceSpotTrading(s))
-      .map((s) => ({
-        symbol: s.symbol,
-        base: s.baseAsset,
-        quote: s.quoteAsset,
-      }));
-    this.binanceSpotSymbolsCache = { list, at: now };
-    return list;
-  }
-
   async searchSymbols(
     query: string,
   ): Promise<Array<{ symbol: string; name: string }>> {
-    const q = query.toLowerCase().trim();
-    if (!q) {
-      return this.commonCryptos.slice(0, 20);
-    }
-
-    const seen = new Set<string>();
-    const out: Array<{ symbol: string; name: string }> = [];
-
-    try {
-      const binanceList = await this.getBinanceSpotSymbolIndex();
-      for (const s of binanceList) {
-        if (out.length >= 40) break;
-        if (seen.has(s.symbol)) continue;
-        const hay = `${s.symbol} ${s.base} ${s.quote}`.toLowerCase();
-        if (!hay.includes(q)) continue;
-        seen.add(s.symbol);
-        out.push({ symbol: s.symbol, name: `${s.base}/${s.quote}` });
-      }
-    } catch (e: any) {
-      console.warn(
-        `Binance 交易对索引不可用（将尝试 OKX/本地）: ${e?.message || e}`,
-      );
-    }
+    const q = query.toLowerCase();
 
     try {
       const data = await requestWithRetry<any>(
@@ -220,27 +139,18 @@ class CryptoProvider implements PriceProvider {
       );
 
       if (data?.data) {
-        const okx = data.data
-          .filter((t: any) => t.instId && t.instId.toLowerCase().includes(q))
-          .slice(0, 25)
+        const results = data.data
+          .filter((t: any) => t.instId.toLowerCase().includes(q))
+          .slice(0, 20)
           .map((t: any) => {
-            const parts = t.instId.split("-");
-            const base = parts[0] || "";
-            const quote = parts.slice(1).join("") || "";
-            return { symbol: base + quote, name: `${base}/${quote || "?"}` };
+            const [base, quote] = t.instId.split("-");
+            return { symbol: base + quote, name: `${base}/${quote}` };
           });
-        for (const r of okx) {
-          if (out.length >= 40) break;
-          if (seen.has(r.symbol)) continue;
-          seen.add(r.symbol);
-          out.push(r);
-        }
+        if (results.length > 0) return results;
       }
     } catch {
-      console.log("OKX API 搜索不可用，已使用 Binance/本地列表");
+      console.log("OKX API 搜索不可用，使用本地列表");
     }
-
-    if (out.length > 0) return out;
 
     return this.commonCryptos.filter(
       (c) =>
