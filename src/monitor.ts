@@ -30,7 +30,7 @@ export class InvestmentMonitor {
 
     await database.init();
     this.running = true;
-    this.scheduleAll();
+    await this.scheduleAll();
   }
 
   stop(): void {
@@ -42,13 +42,13 @@ export class InvestmentMonitor {
     console.log('⏹️  监控已停止');
   }
 
-  scheduleAll(): void {
+  async scheduleAll(): Promise<void> {
     for (const [, timer] of this.timers) {
       clearInterval(timer);
     }
     this.timers.clear();
 
-    const assets = database.getEnabledAssets();
+    const assets = await database.getEnabledAssets();
     if (assets.length === 0) {
       console.log('⚠️  没有配置监控资产');
       return;
@@ -85,7 +85,7 @@ export class InvestmentMonitor {
 
     for (const asset of assets) {
       try {
-        const lastPrice = database.getLatestPrice(asset.id);
+        const lastPrice = await database.getLatestPrice(asset.id);
         const cacheKey = `${asset.type}:${asset.symbol}`;
         let currentPrice = priceCache.get(cacheKey);
         if (currentPrice === undefined) {
@@ -97,7 +97,7 @@ export class InvestmentMonitor {
         const threshold = asset.threshold ?? config.threshold;
 
         if (!lastPrice) {
-          database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
+          await database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
           console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (首次记录) [间隔:${(asset.interval || config.interval) / 1000}s, 阈值:${threshold}%]`);
           continue;
         }
@@ -105,12 +105,12 @@ export class InvestmentMonitor {
         // 窗口内最高/最低价：捕捉「短时间内累计涨跌超过阈值」而相邻两次采样每步都偏小的情况
         const floorSec = this.alertWindowFloorSec.get(asset.id) ?? 0;
         const fromTs = Math.max(timestamp - PRICE_ALERT_LOOKBACK_SECONDS, floorSec);
-        let hist = database.getHistoricalPrices(asset.id, fromTs);
+        let hist = await database.getHistoricalPrices(asset.id, fromTs);
         let windowLabel = `近${PRICE_ALERT_LOOKBACK_SECONDS}s`;
         // 长监控间隔时，回看时间内往往只有 0～1 个点，窗口高低退化为「仅上次价」，窗口类条件永远不触发。
         // 回退：用最近若干条历史采样构造高低区间（仍与当前价比较）。
         if (hist.length < 2) {
-          const tail = database.getLastNPrices(asset.id, 120).filter(h => h.timestamp >= floorSec);
+          const tail = (await database.getLastNPrices(asset.id, 120)).filter(h => h.timestamp >= floorSec);
           if (tail.length >= 2) {
             hist = tail;
             windowLabel = `最近${tail.length}次采样`;
@@ -164,7 +164,7 @@ export class InvestmentMonitor {
         const extra = ` 邻次${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}% | ${windowLabel} 高$${maxInWindow.toFixed(2)} 低$${minInWindow.toFixed(2)}`;
         console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}%) [阈值:${threshold}%]${extra}`);
 
-        database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
+        await database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
 
         if (shouldAlert) {
           this.alertRoundKeys.add(dedupeKey);
@@ -229,26 +229,26 @@ export class InvestmentMonitor {
 
     const id = userId ? `${userId}:${type}:${symbol}` : `${type}:${symbol}`;
     const assetName = name || symbol;
-    database.addAsset(id, userId || '', type, symbol, assetName, interval, threshold);
+    await database.addAsset(id, userId || '', type, symbol, assetName, interval, threshold);
     console.log(`✅ 已添加监控: ${assetName} (${type}) [间隔:${(interval || config.interval) / 1000}s, 阈值:${threshold || config.threshold}%]`);
 
-    if (this.running) this.scheduleAll();
+    if (this.running) await this.scheduleAll();
   }
 
-  updateAsset(id: string, interval?: number, threshold?: number): void {
-    database.updateAsset(id, interval, threshold);
+  async updateAsset(id: string, interval?: number, threshold?: number): Promise<void> {
+    await database.updateAsset(id, interval, threshold);
     console.log(`✏️  已更新: ${id} [间隔:${(interval || config.interval) / 1000}s, 阈值:${threshold || config.threshold}%]`);
-    if (this.running) this.scheduleAll();
+    if (this.running) await this.scheduleAll();
   }
 
-  removeAsset(id: string): void {
-    database.removeAsset(id);
+  async removeAsset(id: string): Promise<void> {
+    await database.removeAsset(id);
     console.log(`🗑️  已移除监控: ${id}`);
-    if (this.running) this.scheduleAll();
+    if (this.running) await this.scheduleAll();
   }
 
-  listAssets(): void {
-    const assets = database.getEnabledAssets();
+  async listAssets(): Promise<void> {
+    const assets = await database.getEnabledAssets();
     console.log('\n📋 当前监控资产:');
     assets.forEach(a => {
       const emoji = this.getTypeEmoji(a.type);

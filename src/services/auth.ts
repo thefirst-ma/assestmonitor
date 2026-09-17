@@ -11,11 +11,11 @@ export class AuthService {
     if (!email || !password) throw new Error('邮箱和密码不能为空');
     if (password.length < 6) throw new Error('密码至少 6 位');
 
-    const existing = database.getUserByEmail(email);
+    const existing = await database.getUserByEmail(email);
     if (existing) throw new Error('该邮箱已注册');
 
     const passwordHash = await bcrypt.hash(password, 10);
-    const user = database.createUser(email, passwordHash);
+    const user = await database.createUser(email, passwordHash);
     const token = this.generateToken(user);
 
     return { user, token };
@@ -24,7 +24,7 @@ export class AuthService {
   async login(email: string, password: string): Promise<{ user: User; token: string }> {
     if (!email || !password) throw new Error('邮箱和密码不能为空');
 
-    const user = database.getUserByEmail(email);
+    const user = await database.getUserByEmail(email);
     if (!user) throw new Error('邮箱或密码错误');
 
     const valid = await bcrypt.compare(password, user.passwordHash);

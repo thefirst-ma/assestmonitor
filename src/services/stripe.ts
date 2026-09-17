@@ -20,14 +20,14 @@ export class StripeService {
   async createCheckoutSession(userId: string, email: string): Promise<string> {
     const s = getStripe();
 
-    let user = database.getUserById(userId);
+    let user = await database.getUserById(userId);
     if (!user) throw new Error('用户不存在');
 
     let customerId = user.stripeCustomerId;
     if (!customerId) {
       const customer = await s.customers.create({ email, metadata: { userId } });
       customerId = customer.id;
-      database.updateStripeCustomer(userId, customerId);
+      await database.updateStripeCustomer(userId, customerId);
     }
 
     const session = await s.checkout.sessions.create({
@@ -44,7 +44,7 @@ export class StripeService {
 
   async createPortalSession(userId: string): Promise<string> {
     const s = getStripe();
-    const user = database.getUserById(userId);
+    const user = await database.getUserById(userId);
     if (!user?.stripeCustomerId) throw new Error('未找到订阅信息');
 
     const session = await s.billingPortal.sessions.create({
@@ -55,7 +55,7 @@ export class StripeService {
     return session.url;
   }
 
-  handleWebhookEvent(payload: Buffer, signature: string): void {
+  async handleWebhookEvent(payload: Buffer, signature: string): Promise<void> {
     const s = getStripe();
     let event: Stripe.Event;
 
@@ -70,7 +70,7 @@ export class StripeService {
         const session = event.data.object as Stripe.Checkout.Session;
         const userId = session.metadata?.userId;
         if (userId) {
-          database.updateUserPlan(
+          await database.updateUserPlan(
             userId, 'pro',
             session.customer as string,
             session.subscription as string
@@ -83,9 +83,9 @@ export class StripeService {
       case 'customer.subscription.deleted': {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
-        const user = database.getUserByStripeCustomerId(customerId);
+        const user = await database.getUserByStripeCustomerId(customerId);
         if (user) {
-          database.updateUserPlan(user.id, 'free', user.stripeCustomerId, undefined);
+          await database.updateUserPlan(user.id, 'free', user.stripeCustomerId, undefined);
           console.log(`⬇️ 用户 ${user.id} 已降级为 Free`);
         }
         break;

@@ -1,12 +1,26 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { InvestmentMonitor } from './monitor';
 import { database } from './database';
-import { config } from './config';
+import { config, recommendationConfig } from './config';
 import { priceService } from './services/price';
 import { NotificationService } from './services/notifier';
 import { authService } from './services/auth';
 import { stripeService } from './services/stripe';
-import { AssetType, PLAN_LIMITS, UserPlan } from './types';
+import { stockAnalysisService } from './services/stock-analysis';
+import { recommendationService } from './services/recommendation';
+import { recommendationScheduler } from './recommendationScheduler';
+import {
+  AssetType,
+  PLAN_LIMITS,
+  RecommendationFactor,
+  RecommendationHorizon,
+  RecommendationReview,
+  ResearchProfile,
+  ReviewOutcome,
+  StockFactorValue,
+  StrategicFactor,
+  UserPlan
+} from './types';
 import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
@@ -14,16 +28,18 @@ import fs from 'fs';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+export { app };
+
 function maskSecret(value: string, visibleEnd = 4): string {
   if (!value || value.length <= visibleEnd) return '****';
   return '****' + value.slice(-visibleEnd);
 }
 
 // Stripe webhook needs raw body, must be before express.json()
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), (req: Request, res: Response) => {
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
   try {
     const sig = req.headers['stripe-signature'] as string;
-    stripeService.handleWebhookEvent(req.body, sig);
+    await stripeService.handleWebhookEvent(req.body, sig);
     res.json({ received: true });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -92,11 +108,11 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 
 // ---- Protected routes ----
 
-app.get('/api/auth/me', authMiddleware, (req: AuthRequest, res: Response) => {
-  const user = database.getUserById(req.userId!);
+app.get('/api/auth/me', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const user = await database.getUserById(req.userId!);
   if (!user) { res.status(404).json({ success: false, message: '用户不存在' }); return; }
 
-  const assetCount = database.getAssetCountByUser(user.id);
+  const assetCount = await database.getAssetCountByUser(user.id);
   const limit = PLAN_LIMITS[user.plan as UserPlan];
 
   res.json({
@@ -122,18 +138,18 @@ app.get('/api/search/:type', async (req: Request, res: Response) => {
 });
 
 // Assets — protected
-app.get('/api/assets', authMiddleware, (req: AuthRequest, res: Response) => {
-  const assets = database.getAssetsByUser(req.userId!);
+app.get('/api/assets', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const assets = await database.getAssetsByUser(req.userId!);
   res.json(assets);
 });
 
 app.post('/api/assets', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const user = database.getUserById(req.userId!);
+    const user = await database.getUserById(req.userId!);
     if (!user) { res.status(404).json({ success: false, message: '用户不存在' }); return; }
 
     const limit = PLAN_LIMITS[user.plan as UserPlan];
-    const count = database.getAssetCountByUser(user.id);
+    const count = await database.getAssetCountByUser(user.id);
 
     if (count >= limit) {
       res.status(403).json({
@@ -153,31 +169,215 @@ app.post('/api/assets', authMiddleware, async (req: AuthRequest, res: Response) 
   }
 });
 
-app.put('/api/assets/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+app.put('/api/assets/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const { interval, threshold } = req.body;
     const assetInterval = interval ? interval * 1000 : undefined;
-    monitor.updateAsset(req.params.id, assetInterval, threshold);
+    await monitor.updateAsset(req.params.id, assetInterval, threshold);
     res.json({ success: true, message: '资产设置已更新' });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
-app.delete('/api/assets/:id', authMiddleware, (req: AuthRequest, res: Response) => {
+app.delete('/api/assets/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    monitor.removeAsset(req.params.id);
+    await monitor.removeAsset(req.params.id);
     res.json({ success: true, message: `已移除监控: ${req.params.id}` });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
 });
 
-app.get('/api/prices/:assetId', authMiddleware, (req: AuthRequest, res: Response) => {
+app.get('/api/prices/:assetId', authMiddleware, async (req: AuthRequest, res: Response) => {
   const hours = parseInt(req.query.hours as string) || 24;
   const fromTimestamp = Math.floor(Date.now() / 1000) - (hours * 60 * 60);
-  const prices = database.getHistoricalPrices(req.params.assetId, fromTimestamp);
+  const prices = await database.getHistoricalPrices(req.params.assetId, fromTimestamp);
   res.json(prices);
+});
+
+app.get('/api/analysis/:assetId', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const asset = await database.getAssetByIdForUser(req.params.assetId, req.userId!);
+    if (!asset) {
+      res.status(404).json({ success: false, message: '资产不存在' });
+      return;
+    }
+    if (asset.type !== 'stock') {
+      res.status(400).json({ success: false, message: '仅支持股票分析' });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 120;
+    const prices = await database.getLastNPrices(asset.id, Math.min(Math.max(limit, 2), 500));
+    const analysis = stockAnalysisService.analyze(asset, prices);
+    res.json({ success: true, analysis });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/recommendations/stocks', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 120;
+    const assets = (await database.getAssetsByUser(req.userId!)).filter(asset => asset.type === 'stock');
+    const pricesByAssetId = new Map(
+      await Promise.all(assets.map(async asset => [asset.id, await database.getLastNPrices(asset.id, Math.min(Math.max(limit, 2), 500))] as const))
+    );
+    const recommendations = stockAnalysisService.rank(assets, pricesByAssetId);
+    res.json({ success: true, recommendations });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/recommendations/staged', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const recommendations = await recommendationService.generateStagedRecommendations();
+    res.json({ success: true, recommendations });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/recommendations/run', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await recommendationService.generateAndSaveRecommendations('manual');
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/recommendations/history', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
+  res.json({ success: true, history: await database.getRecommendationHistory(limit), runs: await database.getRecommendationRuns(20) });
+});
+
+app.get('/api/recommendations/health', authMiddleware, async (req: AuthRequest, res: Response) => {
+  res.json({ success: true, health: await recommendationService.getDataReadiness() });
+});
+
+app.get('/api/recommendations/report/:symbol', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const report = await recommendationService.getStockReport(req.params.symbol);
+    res.json({ success: true, report });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/research-profiles', authMiddleware, async (req: AuthRequest, res: Response) => {
+  res.json({ success: true, profiles: await database.getResearchProfiles() });
+});
+
+app.get('/api/research-profiles/:symbol', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const profile = await database.getResearchProfile(req.params.symbol);
+  if (!profile) {
+    res.status(404).json({ success: false, message: '研究档案不存在' });
+    return;
+  }
+  res.json({ success: true, profile });
+});
+
+app.post('/api/research-profiles', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body;
+    const factor = (key: string): StrategicFactor => ({
+      score: Math.min(100, Math.max(0, Math.round(Number(body[key]?.score ?? 60)))),
+      label: String(body[key]?.label || '待研究'),
+      summary: String(body[key]?.summary || '')
+    });
+    const profile: ResearchProfile = {
+      symbol: String(body.symbol || '').trim().toUpperCase(),
+      moat: factor('moat'),
+      leadership: factor('leadership'),
+      industryTrend: factor('industryTrend'),
+      policyImpact: factor('policyImpact'),
+      confidence: Math.min(100, Math.max(0, Math.round(Number(body.confidence ?? 60)))),
+      notes: String(body.notes || ''),
+      updatedAt: Math.floor(Date.now() / 1000)
+    };
+    if (!profile.symbol) {
+      res.status(400).json({ success: false, message: '请填写股票代码' });
+      return;
+    }
+    res.json({ success: true, profile: await database.upsertResearchProfile(profile) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/recommendation-factors', authMiddleware, async (req: AuthRequest, res: Response) => {
+  res.json({ success: true, factors: await database.getRecommendationFactors(true) });
+});
+
+app.post('/api/recommendation-factors', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    const factor: Partial<RecommendationFactor> & Pick<RecommendationFactor, 'name'> = {
+      id: body.id ? String(body.id).trim() : undefined,
+      name: String(body.name || '').trim(),
+      description: String(body.description || ''),
+      weight: Number(body.weight ?? 1),
+      enabled: body.enabled === undefined ? true : Boolean(body.enabled),
+      sortOrder: Math.round(Number(body.sortOrder ?? 100))
+    };
+    if (!factor.name) {
+      res.status(400).json({ success: false, message: '请填写因子名称' });
+      return;
+    }
+    res.json({ success: true, factor: await database.upsertRecommendationFactor(factor) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/stock-factor-values/:symbol', authMiddleware, async (req: AuthRequest, res: Response) => {
+  res.json({ success: true, values: await database.getStockFactorValues(req.params.symbol) });
+});
+
+app.post('/api/stock-factor-values', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    const value: StockFactorValue = {
+      symbol: String(body.symbol || '').trim().toUpperCase(),
+      factorId: String(body.factorId || '').trim(),
+      score: Math.min(100, Math.max(0, Math.round(Number(body.score ?? 60)))),
+      label: String(body.label || ''),
+      summary: String(body.summary || ''),
+      updatedAt: Math.floor(Date.now() / 1000)
+    };
+    res.json({ success: true, value: await database.upsertStockFactorValue(value) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/recommendation-reviews', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const body = req.body || {};
+    const allowedOutcomes: ReviewOutcome[] = ['accurate', 'inaccurate', 'mixed', 'pending'];
+    const outcome = allowedOutcomes.includes(body.outcome) ? body.outcome : 'pending';
+    const allowedHorizons: RecommendationHorizon[] = ['monthly', 'quarterly', 'yearly'];
+    const horizon = allowedHorizons.includes(body.horizon) ? body.horizon : undefined;
+    if (!horizon) {
+      res.status(400).json({ success: false, message: '推荐阶段不合法' });
+      return;
+    }
+    const review: RecommendationReview = {
+      runId: String(body.runId || ''),
+      symbol: String(body.symbol || '').trim().toUpperCase(),
+      horizon,
+      outcome,
+      reason: String(body.reason || ''),
+      actualReturn: body.actualReturn === undefined || body.actualReturn === '' ? undefined : Number(body.actualReturn),
+      reviewedAt: Math.floor(Date.now() / 1000)
+    };
+    res.json({ success: true, review: await database.upsertRecommendationReview(review) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
 });
 
 // ---- Stripe routes ----
@@ -230,14 +430,26 @@ app.get('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
       telegramProxyPort: envVars.TELEGRAM_PROXY_PORT || '',
       hasToken: !!envVars.TELEGRAM_BOT_TOKEN,
       hasChatId: !!envVars.TELEGRAM_CHAT_ID,
-      hasWebhookUrl: !!envVars.WEBHOOK_URL
+      hasWebhookUrl: !!envVars.WEBHOOK_URL,
+      recommendationEnabled: recommendationConfig.enabled,
+      recommendationLimit: recommendationConfig.limit,
+      recommendationMinScore: recommendationConfig.minScore,
+      recommendationHour: recommendationConfig.hour,
+      recommendationMinute: recommendationConfig.minute,
+      recommendationTimezone: recommendationConfig.timezone
     });
   } else {
     res.json({
       interval: config.interval, threshold: config.threshold,
       emailEnabled: config.notifications.email?.enabled || false,
       webhookEnabled: config.notifications.webhook?.enabled || false,
-      telegramEnabled: config.notifications.telegram?.enabled || false
+      telegramEnabled: config.notifications.telegram?.enabled || false,
+      recommendationEnabled: recommendationConfig.enabled,
+      recommendationLimit: recommendationConfig.limit,
+      recommendationMinScore: recommendationConfig.minScore,
+      recommendationHour: recommendationConfig.hour,
+      recommendationMinute: recommendationConfig.minute,
+      recommendationTimezone: recommendationConfig.timezone
     });
   }
 });
@@ -384,6 +596,7 @@ app.post('/api/telegram/test', authMiddleware, async (req: Request, res: Respons
 
 async function startServer() {
   await monitor.start();
+  recommendationScheduler.start();
 
   const tryListen = (port: number, maxRetries = 5): void => {
     const server = app.listen(port, () => {
@@ -404,10 +617,13 @@ async function startServer() {
   tryListen(Number(PORT));
 }
 
-process.on('SIGINT', () => {
-  console.log('\n\n👋 收到退出信号，正在关闭...');
-  monitor.stop();
-  process.exit(0);
-});
+if (require.main === module) {
+  process.on('SIGINT', () => {
+    console.log('\n\n👋 收到退出信号，正在关闭...');
+    monitor.stop();
+    recommendationScheduler.stop();
+    process.exit(0);
+  });
 
-startServer().catch(console.error);
+  startServer().catch(console.error);
+}

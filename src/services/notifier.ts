@@ -52,6 +52,11 @@ export class NotificationService {
     await this.sendTelegramText(text, label);
   }
 
+  async sendTelegramMessage(message: string, logLabel = 'message'): Promise<void> {
+    if (!this.config.telegram?.enabled) return;
+    await this.sendTelegramText(message, logLabel);
+  }
+
   private async sendEmailForAlert(alert: PriceAlert): Promise<void> {
     if (!this.config.email?.enabled) return;
     await this.sendEmail(this.formatMessage(alert), alert);

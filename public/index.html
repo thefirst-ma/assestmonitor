@@ -1,629 +1,1396 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>投资标的监控平台</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>长期股票投研推荐系统</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --line: #e5ebf5;
+      --line-strong: #d5dfef;
+      --text: #142033;
+      --muted: #667085;
+      --blue: #2563eb;
+      --blue-weak: #eaf1ff;
+      --green: #16a34a;
+      --green-weak: #e9f8ef;
+      --orange: #f59e0b;
+      --orange-weak: #fff4df;
+      --red: #e5484d;
+      --red-weak: #fff0f0;
+      --violet: #7c3aed;
+      --violet-weak: #f1ecff;
+      --shadow: 0 12px 32px rgba(18, 35, 66, .08);
+      --soft-shadow: 0 1px 2px rgba(18, 35, 66, .06);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin: 0;
       min-height: 100vh;
-      padding: 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      letter-spacing: 0;
     }
-    .container { max-width: 1200px; margin: 0 auto; }
-    .header {
-      background: white; padding: 25px 30px; border-radius: 15px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.2); margin-bottom: 20px;
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    a { color: inherit; }
+
+    .auth-page {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
     }
-    .header-top { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-    .header h1 { color: #667eea; font-size: 1.8em; }
-    .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .user-info { font-size: 14px; color: #555; }
-    .plan-badge {
-      display: inline-block; padding: 4px 14px; border-radius: 20px;
-      font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+    .auth-card {
+      width: min(430px, 100%);
+      padding: 30px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
     }
-    .plan-free { background: #e0e7ff; color: #4f46e5; }
-    .plan-pro { background: linear-gradient(135deg,#f59e0b,#f97316); color: #fff; }
-    .asset-quota { font-size: 13px; color: #888; }
+    .auth-brand { display: flex; gap: 12px; align-items: center; margin-bottom: 22px; }
+    .logo {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: #2463eb;
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(37, 99, 235, .24);
+    }
+    .logo svg { width: 25px; height: 25px; }
+    .auth-brand h1 { margin: 0 0 3px; font-size: 22px; }
+    .auth-brand p { margin: 0; color: var(--muted); font-size: 13px; }
+    .auth-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      padding: 5px;
+      background: #f0f4fb;
+      border-radius: var(--radius);
+      margin-bottom: 18px;
+    }
+    .auth-tabs button {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px;
+      color: var(--muted);
+      background: transparent;
+      font-weight: 800;
+    }
+    .auth-tabs button.active { background: #fff; color: var(--blue); box-shadow: var(--soft-shadow); }
+
+    .field { display: grid; gap: 7px; margin-bottom: 13px; }
+    .field label { font-size: 13px; color: #344054; font-weight: 800; }
+    input, select, textarea {
+      width: 100%;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      color: var(--text);
+      border-radius: 7px;
+      padding: 10px 12px;
+      outline: 0;
+      transition: border-color .15s, box-shadow .15s, background .15s;
+    }
+    textarea { min-height: 78px; resize: vertical; }
+    input:focus, select:focus, textarea:focus {
+      border-color: #8db2ff;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+    }
     .btn {
-      padding: 10px 20px; background: #667eea; color: white;
-      border: none; border-radius: 8px; cursor: pointer;
-      font-size: 14px; font-weight: 600; transition: all 0.3s; white-space: nowrap;
+      border: 0;
+      border-radius: 7px;
+      min-height: 38px;
+      padding: 9px 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      color: #fff;
+      background: var(--blue);
+      font-weight: 900;
+      box-shadow: 0 8px 16px rgba(37, 99, 235, .15);
     }
-    .btn:hover { background: #5568d3; transform: translateY(-1px); }
-    .btn-small { padding: 7px 14px; font-size: 13px; }
-    .btn-danger { background: #ef4444; }
-    .btn-danger:hover { background: #dc2626; }
-    .btn-success { background: #10b981; }
-    .btn-success:hover { background: #059669; }
-    .btn-upgrade { background: linear-gradient(135deg,#f59e0b,#f97316); }
-    .btn-upgrade:hover { background: #f97316; }
-    .btn-outline { background: transparent; color: #667eea; border: 2px solid #667eea; }
-    .btn-logout { background: transparent; color: #999; border: 1px solid #ddd; padding: 6px 14px; font-size: 13px; }
+    .btn:hover { filter: brightness(.98); }
+    .btn.secondary { background: #fff; color: #1d4ed8; border: 1px solid #c9d7ee; box-shadow: none; }
+    .btn.ghost { background: #f3f6fb; color: #334155; box-shadow: none; }
+    .btn.danger { background: var(--red); box-shadow: none; }
+    .btn.small { min-height: 30px; padding: 6px 10px; font-size: 12px; }
 
-    .privacy-banner {
-      background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px;
-      padding: 12px 20px; margin-bottom: 15px; font-size: 13px; color: #166534;
-      display: flex; align-items: center; gap: 10px;
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 214px 1fr;
+    }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      background: #fff;
+      border-right: 1px solid var(--line);
+      padding: 18px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; padding: 0 4px 12px; }
+    .brand .logo { width: 42px; height: 42px; }
+    .brand h1 { margin: 0; font-size: 20px; line-height: 1.2; }
+    .brand p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+    .nav { display: grid; gap: 6px; }
+    .nav button {
+      display: grid;
+      grid-template-columns: 24px 1fr;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      background: transparent;
+      color: #3c4a60;
+      border-radius: 7px;
+      padding: 11px 10px;
+      text-align: left;
+      font-weight: 900;
+    }
+    .nav button:hover { background: #f2f6fd; }
+    .nav button.active { background: var(--blue); color: #fff; box-shadow: 0 10px 20px rgba(37, 99, 235, .18); }
+    .nav .nav-icon { width: 22px; height: 22px; display: grid; place-items: center; }
+    .sidebar-note {
+      margin-top: auto;
+      padding: 14px;
+      border: 1px solid #dce6f7;
+      background: #f7faff;
+      border-radius: 10px;
+    }
+    .note-illustration {
+      height: 94px;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      background:
+        linear-gradient(135deg, rgba(37, 99, 235, .12), rgba(22, 163, 74, .08)),
+        radial-gradient(circle at 72% 28%, rgba(37, 99, 235, .16), transparent 34%);
+      display: grid;
+      place-items: center;
+    }
+    .paper-chart {
+      width: 82px;
+      height: 62px;
+      border: 1px solid #c8d8f4;
+      border-radius: 7px;
+      background: #fff;
+      box-shadow: 0 10px 22px rgba(37, 99, 235, .12);
+      position: relative;
+    }
+    .paper-chart:before {
+      content: "";
+      position: absolute;
+      inset: 14px 12px;
+      border-left: 2px solid #dbe6f7;
+      border-bottom: 2px solid #dbe6f7;
+    }
+    .paper-chart:after {
+      content: "";
+      position: absolute;
+      left: 17px;
+      top: 24px;
+      width: 48px;
+      height: 22px;
+      border: solid var(--blue);
+      border-width: 0 0 3px 3px;
+      transform: skew(-22deg) rotate(-8deg);
+    }
+    .sidebar-note b { display: block; margin-bottom: 6px; color: #1d4ed8; }
+    .sidebar-note span { color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .content { min-width: 0; }
+    .topbar {
+      height: 74px;
+      display: grid;
+      grid-template-columns: minmax(280px, 560px) 1fr;
+      align-items: center;
+      gap: 18px;
+      padding: 0 24px;
+      background: rgba(255, 255, 255, .88);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .search {
+      position: relative;
+      max-width: 560px;
+      justify-self: center;
+      width: 100%;
+    }
+    .search input {
+      height: 44px;
+      padding-left: 18px;
+      padding-right: 44px;
+      border-radius: 9px;
+      background: #fff;
+      box-shadow: var(--soft-shadow);
+    }
+    .search svg {
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #566174;
+    }
+    .top-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .date-chip, .notification-chip, .user-chip {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #344054;
+      white-space: nowrap;
+    }
+    .notification-chip {
+      width: 38px;
+      justify-content: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      position: relative;
+      background: #fff;
+    }
+    .notification-chip:after {
+      content: "3";
+      position: absolute;
+      right: -3px;
+      top: -5px;
+      width: 18px;
+      height: 18px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--red);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #d7ecff, #9cc7ee);
+      display: grid;
+      place-items: center;
+      color: #17324d;
+      font-weight: 900;
+      border: 3px solid #e7f3ff;
     }
 
-    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
-    .tab {
-      flex: 1; padding: 13px; background: white; border: none;
-      border-radius: 10px; cursor: pointer; font-size: 15px;
-      font-weight: 600; transition: all 0.3s;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    .page {
+      padding: 18px 20px 28px;
     }
-    .tab.active { background: #667eea; color: white; transform: translateY(-2px); }
-    .content { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
+    .page-title { display: none; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 500px;
+      gap: 14px;
+      align-items: start;
+    }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .kpi, .panel, .recommend-card, .table-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--soft-shadow);
+    }
+    .kpi {
+      min-height: 108px;
+      display: grid;
+      grid-template-columns: 62px 1fr;
+      align-items: center;
+      gap: 14px;
+      padding: 18px;
+    }
+    .kpi-icon {
+      width: 58px;
+      height: 58px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+    }
+    .kpi-icon.blue { background: var(--blue-weak); color: var(--blue); }
+    .kpi-icon.green { background: var(--green-weak); color: var(--green); }
+    .kpi-icon.violet { background: var(--violet-weak); color: var(--violet); }
+    .kpi-icon.orange { background: var(--orange-weak); color: var(--orange); }
+    .kpi small { display: block; color: var(--muted); margin-bottom: 4px; }
+    .kpi strong { display: block; font-size: 30px; line-height: 1; }
+    .kpi .delta { margin-top: 7px; font-size: 12px; color: var(--muted); }
+    .delta.positive { color: var(--green); }
 
-    .add-asset { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; margin-bottom: 15px; }
-    .add-asset select, .add-asset input { padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 15px; }
-    .search-container { position: relative; }
-    .search-results {
-      position: absolute; top: 100%; left: 0; right: 0; background: white;
-      border: 2px solid #e0e0e0; border-top: none; border-radius: 0 0 8px 8px;
-      max-height: 300px; overflow-y: auto; z-index: 100; display: none;
+    .panel { padding: 16px; margin-bottom: 14px; }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
     }
-    .search-results.show { display: block; }
-    .search-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
-    .search-item:hover { background: #f8f9fa; }
-    .search-item strong { display: block; color: #333; }
-    .search-item small { color: #666; }
-
-    .asset-list { display: grid; gap: 12px; }
-    .asset-item {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 18px; background: #f8f9fa; border-radius: 10px;
-      border-left: 4px solid #667eea; flex-wrap: wrap; gap: 10px;
-    }
-    .asset-info h3 { color: #333; margin-bottom: 4px; font-size: 15px; }
-    .asset-info p { color: #666; font-size: 13px; }
-    .asset-badge {
-      display: inline-block; padding: 3px 10px; background: #667eea;
-      color: white; border-radius: 10px; font-size: 11px; margin-right: 8px;
+    .panel-head h2, .panel-head h3 { margin: 0; font-size: 18px; }
+    .panel-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+    .link-btn {
+      border: 0;
+      background: transparent;
+      color: var(--blue);
+      font-weight: 900;
+      padding: 0;
     }
 
-    .form-group { margin-bottom: 20px; }
-    .form-group label { display: block; margin-bottom: 6px; color: #333; font-weight: 600; font-size: 14px; }
-    .form-group input, .form-group select { width: 100%; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 15px; }
-    .form-group small { display: block; margin-top: 4px; color: #888; font-size: 12px; }
-    .form-section { background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-    .form-section h3 { color: #667eea; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-    .config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; }
-    @media (max-width: 1000px) { .config-grid { grid-template-columns: 1fr; } }
+    .recommend-lanes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .lane {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+    }
+    .lane-title {
+      padding: 12px 14px;
+      text-align: center;
+      font-weight: 900;
+      font-size: 14px;
+    }
+    .lane-title.blue { color: var(--blue); background: #f6f9ff; }
+    .lane-title.green { color: var(--green); background: #f4fbf7; }
+    .lane-title.orange { color: var(--orange); background: #fffaf1; }
+    .recommend-list { display: grid; gap: 0; }
+    .recommend-item {
+      display: grid;
+      grid-template-columns: 42px 1fr 70px;
+      gap: 10px;
+      padding: 12px;
+      border-top: 1px solid var(--line);
+      align-items: center;
+    }
+    .asset-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: #f1f5ff;
+      color: var(--blue);
+      border: 1px solid #dbe8ff;
+      font-weight: 900;
+      font-size: 12px;
+    }
+    .recommend-item b { display: block; font-size: 14px; }
+    .recommend-item small { display: block; color: var(--muted); line-height: 1.5; margin-top: 2px; }
+    .recommend-score { text-align: right; color: var(--blue); font-size: 12px; font-weight: 900; }
+    .spark {
+      width: 52px;
+      height: 26px;
+      margin-left: auto;
+      display: block;
+    }
 
-    .toggle-switch { position: relative; display: inline-block; width: 52px; height: 26px; }
-    .toggle-switch input { opacity: 0; width: 0; height: 0; }
-    .toggle-slider {
-      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #ccc; transition: .3s; border-radius: 26px;
+    .right-stack { display: grid; gap: 14px; }
+    .chart-tabs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
-    .toggle-slider:before {
-      position: absolute; content: ""; height: 20px; width: 20px;
-      left: 3px; bottom: 3px; background: white; transition: .3s; border-radius: 50%;
+    .seg {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: #536071;
+      border-radius: 7px;
+      padding: 7px 12px;
+      font-weight: 900;
+      font-size: 13px;
     }
-    input:checked + .toggle-slider { background-color: #10b981; }
-    input:checked + .toggle-slider:before { transform: translateX(26px); }
-    .toggle-label { display: flex; align-items: center; gap: 12px; font-weight: 600; }
-    .toggle-status { font-size: 13px; color: #888; min-width: 40px; }
+    .seg.active { color: #fff; background: var(--blue); border-color: var(--blue); }
+    .chart-card svg { width: 100%; height: 190px; display: block; }
+    .legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; color: #475467; }
+    .legend i { display: inline-block; width: 22px; height: 3px; border-radius: 999px; margin-right: 6px; vertical-align: middle; }
 
-    .notification {
-      position: fixed; top: 20px; right: 20px; padding: 14px 20px;
-      background: white; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-      z-index: 1000; animation: slideIn 0.3s; max-width: 380px;
+    .table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
     }
-    @keyframes slideIn { from { transform: translateX(400px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-    .notification.success { border-left: 4px solid #10b981; }
-    .notification.error { border-left: 4px solid #ef4444; }
+    .table th, .table td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+      font-size: 13px;
+    }
+    .table th {
+      background: #f7f9fd;
+      color: #475467;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .table tr:last-child td { border-bottom: 0; }
+    .table tbody tr:hover { background: #fbfdff; }
+    .table small { color: var(--muted); }
+    .gain { color: var(--red); font-weight: 900; }
+    .loss { color: var(--green); font-weight: 900; }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+      margin-right: 8px;
+    }
+    .status-pill {
+      display: inline-flex;
+      min-height: 24px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .status-pill.green { background: var(--green-weak); color: var(--green); }
+    .status-pill.orange { background: var(--orange-weak); color: #a16207; }
+    .status-pill.red { background: var(--red-weak); color: var(--red); }
+    .status-pill.blue { background: var(--blue-weak); color: var(--blue); }
 
-    /* Auth page */
-    .auth-container {
-      max-width: 420px; margin: 60px auto; background: white;
-      padding: 40px; border-radius: 15px; box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.1fr 500px;
+      gap: 14px;
+      align-items: start;
     }
-    .auth-container h2 { text-align: center; color: #667eea; margin-bottom: 8px; font-size: 1.6em; }
-    .auth-container p.subtitle { text-align: center; color: #888; margin-bottom: 25px; font-size: 14px; }
-    .auth-tabs { display: flex; gap: 0; margin-bottom: 25px; border-radius: 8px; overflow: hidden; border: 2px solid #667eea; }
-    .auth-tab {
-      flex: 1; padding: 10px; text-align: center; cursor: pointer;
-      font-weight: 600; font-size: 14px; border: none; background: white; color: #667eea;
+    .factor-row {
+      display: grid;
+      grid-template-columns: 110px 1fr 70px;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      font-size: 13px;
     }
-    .auth-tab.active { background: #667eea; color: white; }
-    .auth-privacy { font-size: 12px; color: #999; text-align: center; margin-top: 18px; line-height: 1.6; }
+    .bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #e8eef8;
+      overflow: hidden;
+    }
+    .bar span { display: block; height: 100%; border-radius: 999px; background: var(--blue); }
+    .factor-snapshot {
+      display: grid;
+      grid-template-columns: 140px 1fr 110px;
+      gap: 14px;
+      align-items: center;
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfdff;
+    }
+    .donut {
+      width: 104px;
+      height: 104px;
+      border-radius: 999px;
+      background: conic-gradient(var(--blue) 0 30%, var(--green) 30% 52%, var(--violet) 52% 79%, var(--orange) 79% 100%);
+      position: relative;
+      margin: 0 auto;
+    }
+    .donut:after {
+      content: "";
+      position: absolute;
+      inset: 20px;
+      background: #fff;
+      border-radius: 999px;
+    }
+    .big-score { text-align: center; border-left: 1px solid var(--line); padding-left: 10px; }
+    .big-score strong { display: block; color: var(--blue); font-size: 34px; }
+    .big-score small { color: var(--muted); }
 
-    .empty-state { text-align: center; padding: 50px 20px; color: #888; }
-    .empty-state h3 { margin-top: 15px; }
+    .data-source-card {
+      display: grid;
+      gap: 12px;
+    }
+    .source-current {
+      padding: 13px;
+      border-radius: 8px;
+      background: #f7faff;
+      border: 1px solid var(--line);
+    }
+    .source-current small { color: var(--muted); display: block; margin-bottom: 4px; }
+    .source-current b { font-size: 16px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: #f2f5fb;
+      border: 1px solid var(--line);
+      color: #344054;
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .form-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+    .empty { padding: 28px; text-align: center; color: var(--muted); }
+    .review-box { display: grid; gap: 8px; min-width: 360px; }
+    .review-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 8px; align-items: start; }
+    .factor-chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; }
+    .factor-chip {
+      border: 1px solid #d9e2ee;
+      background: #f8fafc;
+      border-radius: 7px;
+      padding: 5px 7px;
+      line-height: 1.35;
+    }
+    .factor-chip b { display: block; font-size: 12px; color: #26364d; }
+    .factor-chip span { color: var(--muted); font-size: 11px; }
+    .toast {
+      position: fixed;
+      right: 20px;
+      top: 90px;
+      z-index: 20;
+      max-width: 360px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--green);
+      box-shadow: var(--shadow);
+      font-weight: 800;
+    }
+    .toast.error { border-left-color: var(--red); }
+
+    @media (max-width: 1480px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .bottom-grid { grid-template-columns: 1fr 1fr; }
+      .right-stack { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 1100px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .topbar { grid-template-columns: 1fr; height: auto; padding: 14px; }
+      .search { justify-self: stretch; max-width: none; }
+      .top-actions { justify-content: flex-start; flex-wrap: wrap; }
+      .kpis, .recommend-lanes, .bottom-grid, .right-stack, .grid2, .grid3, .form-row { grid-template-columns: 1fr; }
+      .factor-snapshot { grid-template-columns: 1fr; }
+      .big-score { border-left: 0; border-top: 1px solid var(--line); padding: 12px 0 0; }
+    }
   </style>
 </head>
 <body>
-  <!-- Auth Page -->
-  <div id="authPage" class="auth-container" style="display:none;">
-    <h2>📊 投资标的监控平台</h2>
-    <p class="subtitle">多品类资产价格监控与通知</p>
-    <div class="auth-tabs">
-      <button class="auth-tab active" onclick="switchAuthTab('login')">登录</button>
-      <button class="auth-tab" onclick="switchAuthTab('register')">注册</button>
+  <div id="authPage" class="auth-page" style="display:none;">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 16l5-5 4 4 7-9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M18 6h2v5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1>长期股票投研推荐系统</h1>
+          <p>面向月度、季度、年度的长期关注与推荐</p>
+        </div>
+      </div>
+      <div class="auth-tabs">
+        <button id="loginTab" class="active" onclick="switchAuth('login')">登录</button>
+        <button id="registerTab" onclick="switchAuth('register')">注册</button>
+      </div>
+      <div id="loginForm">
+        <div class="field"><label>邮箱</label><input id="loginEmail" type="email" autocomplete="email" /></div>
+        <div class="field"><label>密码</label><input id="loginPassword" type="password" autocomplete="current-password" /></div>
+        <button class="btn" style="width:100%;" onclick="login()">登录系统</button>
+      </div>
+      <div id="registerForm" style="display:none;">
+        <div class="field"><label>邮箱</label><input id="regEmail" type="email" autocomplete="email" /></div>
+        <div class="field"><label>密码</label><input id="regPassword" type="password" autocomplete="new-password" /></div>
+        <button class="btn" style="width:100%;" onclick="register()">创建账户</button>
+      </div>
     </div>
-    <div id="loginForm">
-      <div class="form-group"><label>邮箱</label><input type="email" id="loginEmail" placeholder="your@email.com" /></div>
-      <div class="form-group"><label>密码</label><input type="password" id="loginPassword" placeholder="输入密码" /></div>
-      <button class="btn" style="width:100%;padding:12px;" onclick="doLogin()">登录</button>
-    </div>
-    <div id="registerForm" style="display:none;">
-      <div class="form-group"><label>邮箱</label><input type="email" id="regEmail" placeholder="your@email.com" /></div>
-      <div class="form-group"><label>密码</label><input type="password" id="regPassword" placeholder="至少 6 位" /></div>
-      <div class="form-group"><label>确认密码</label><input type="password" id="regPassword2" placeholder="再次输入密码" /></div>
-      <button class="btn" style="width:100%;padding:12px;" onclick="doRegister()">注册</button>
-    </div>
-    <div class="auth-privacy">🔒 您的所有数据（资产配置、价格记录、通知设置）<br>均存储在本服务器本地数据库中，绝不会分享给第三方。</div>
   </div>
 
-  <!-- Main App -->
-  <div id="appPage" class="container" style="display:none;">
-    <div class="header">
-      <div class="header-top">
-        <h1>📊 投资标的监控平台</h1>
-        <div class="header-right">
-          <span class="user-info" id="userEmail"></span>
-          <span class="plan-badge plan-free" id="planBadge">Free</span>
-          <span class="asset-quota" id="assetQuota"></span>
-          <button class="btn btn-small btn-upgrade" id="upgradeBtn" onclick="upgradePro()" style="display:none;">升级 Pro</button>
-          <button class="btn btn-small btn-outline" id="manageSubBtn" onclick="manageSubscription()" style="display:none;">管理订阅</button>
-          <button class="btn-logout" onclick="doLogout()">退出</button>
+  <div id="appPage" class="app" style="display:none;">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 16l5-5 4 4 7-9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M18 6h2v5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div>
+          <h1>长期股票投研推荐系统</h1>
+          <p>月度、季度、年度长期推荐</p>
         </div>
       </div>
-    </div>
-
-    <div class="privacy-banner">
-      🔒 <span>您的所有隐私数据均存储在本地服务器，绝不上传或分享给任何第三方。</span>
-    </div>
-
-    <div class="tabs">
-      <button class="tab active" onclick="switchTab('monitor')">资产监控</button>
-      <button class="tab" onclick="switchTab('config')">系统配置</button>
-    </div>
+      <nav class="nav">
+        <button class="active" onclick="switchSection(event, 'dashboard')"><span class="nav-icon">⌂</span>首页总览</button>
+        <button onclick="switchSection(event, 'watchlist')"><span class="nav-icon">▣</span>资产候选池</button>
+        <button onclick="switchSection(event, 'monitor')"><span class="nav-icon">▤</span>价格监控</button>
+        <button onclick="switchSection(event, 'recommendations')"><span class="nav-icon">⇧</span>股票推荐</button>
+        <button onclick="switchSection(event, 'factors')"><span class="nav-icon">≋</span>推荐因子</button>
+        <button onclick="switchSection(event, 'history')"><span class="nav-icon">↺</span>推荐复盘</button>
+        <button onclick="switchSection(event, 'notifications')"><span class="nav-icon">◇</span>通知中心</button>
+        <button onclick="switchSection(event, 'datasources')"><span class="nav-icon">◎</span>数据源管理</button>
+        <button onclick="switchSection(event, 'settings')"><span class="nav-icon">⚙</span>系统设置</button>
+      </nav>
+      <div class="sidebar-note">
+        <div class="note-illustration"><div class="paper-chart"></div></div>
+        <b>长期价值 · 科学投研</b>
+        <span>基于因子与数据驱动的长期投资研究与推荐。</span>
+      </div>
+    </aside>
 
     <div class="content">
-      <div id="monitor" class="tab-content active">
-        <div class="add-asset">
-          <select id="assetType" onchange="clearSearch()">
-            <option value="crypto">加密货币</option>
-            <option value="stock">股票</option>
-            <option value="metal">贵金属</option>
-            <option value="forex">外汇</option>
-          </select>
-          <div class="search-container">
-            <input type="text" id="assetSearch" placeholder="搜索或输入代码..." oninput="searchAssets()" />
-            <div id="searchResults" class="search-results"></div>
-          </div>
-          <button class="btn" onclick="addAsset()">添加监控</button>
+      <header class="topbar">
+        <div class="search">
+          <input id="globalSearch" placeholder="搜索股票 / 因子 / 报告 / 功能" onkeydown="handleGlobalSearch(event)" />
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/>
+            <path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
         </div>
-        <div class="add-asset" style="grid-template-columns: 1fr 1fr;">
-          <div>
-            <label style="font-size:12px;color:#888;">监控间隔（秒，留空用全局）</label>
-            <input type="number" id="assetInterval" placeholder="如 120" min="10" step="10" style="width:100%;padding:8px;border:2px solid #e0e0e0;border-radius:8px;" />
-          </div>
-          <div>
-            <label style="font-size:12px;color:#888;">涨跌幅阈值（%，留空用全局）</label>
-            <input type="number" id="assetThreshold" placeholder="如 0.5" min="0.01" step="0.01" style="width:100%;padding:8px;border:2px solid #e0e0e0;border-radius:8px;" />
-          </div>
+        <div class="top-actions">
+          <span class="date-chip">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" stroke="currentColor" stroke-width="2"/><path d="M8 3v4M16 3v4M4 10h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span id="todayText"></span>
+          </span>
+          <span class="notification-chip">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true"><path d="M18 9a6 6 0 10-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 21h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </span>
+          <div class="avatar" id="avatarInitial">投</div>
+          <span class="user-chip">欢迎回来，<b id="userEmail">投资者</b></span>
+          <button class="btn ghost small" onclick="logout()">退出</button>
         </div>
-        <div id="assetList" class="asset-list"></div>
-      </div>
+      </header>
 
-      <div id="config" class="tab-content">
-        <form onsubmit="saveConfig(event)">
-          <div class="form-section">
-            <h3>⚙️ 基础配置</h3>
-            <div class="form-group"><label>监控间隔（秒）</label><input type="number" id="interval" min="60" step="60" /><small>建议 900 秒（15分钟）或更长</small></div>
-            <div class="form-group"><label>涨跌幅阈值（%）</label><input type="number" id="threshold" min="0.01" step="0.01" /><small>价格变动超过此百分比时触发通知</small></div>
-          </div>
-          <div class="config-grid">
-            <div class="form-section">
-              <h3><span>📧 邮件通知</span><button type="button" class="btn btn-small btn-success" onclick="testEmail()">测试</button></h3>
-              <div class="form-group"><label class="toggle-label"><span>启用</span><label class="toggle-switch"><input type="checkbox" id="emailEnabled" /><span class="toggle-slider"></span></label><span class="toggle-status">已关闭</span></label></div>
-              <div class="form-group"><label>SMTP 服务器</label><input type="text" id="emailHost" placeholder="smtp.gmail.com" /></div>
-              <div class="form-group"><label>SMTP 端口</label><input type="number" id="emailPort" placeholder="587" /></div>
-              <div class="form-group"><label>发件邮箱</label><input type="email" id="emailUser" /></div>
-              <div class="form-group"><label>密码</label><input type="password" id="emailPass" /></div>
-              <div class="form-group"><label>收件邮箱</label><input type="email" id="emailTo" /></div>
+      <main class="page">
+        <section id="dashboard" class="section active">
+          <div class="dashboard-grid">
+            <div>
+              <div class="kpis">
+                <div class="kpi"><div class="kpi-icon blue">◔</div><div><small>候选资产</small><strong id="assetCountStat">0</strong><div class="delta">较昨日 0</div></div></div>
+                <div class="kpi"><div class="kpi-icon green">▰</div><div><small>价格记录</small><strong id="priceCountStat">0</strong><div class="delta positive">监控运行中</div></div></div>
+                <div class="kpi"><div class="kpi-icon violet">⌬</div><div><small>推荐因子</small><strong id="factorCountStat">0</strong><div class="delta">已启用</div></div></div>
+                <div class="kpi"><div class="kpi-icon orange">▷</div><div><small>推荐运行记录</small><strong id="runCountStat">0</strong><div class="delta">历史快照</div></div></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <div><h2>今日长期推荐</h2><p>月度看趋势，季度看景气，年度看护城河与负责人。</p></div>
+                  <button class="link-btn" onclick="switchSectionById('recommendations')">查看全部推荐明细 →</button>
+                </div>
+                <div id="dashboardRecommendations" class="recommend-lanes"></div>
+              </div>
             </div>
-            <div class="form-section">
-              <h3><span>🔔 Webhook</span><button type="button" class="btn btn-small btn-success" onclick="testWebhook()">测试</button></h3>
-              <div class="form-group"><label class="toggle-label"><span>启用</span><label class="toggle-switch"><input type="checkbox" id="webhookEnabled" /><span class="toggle-slider"></span></label><span class="toggle-status">已关闭</span></label></div>
-              <div class="form-group"><label>类型</label><select id="webhookType"><option value="dingtalk">钉钉</option><option value="wecom">企业微信</option><option value="custom">自定义</option></select></div>
-              <div class="form-group"><label>URL</label><input type="url" id="webhookUrl" /></div>
-            </div>
-          </div>
-          <div class="form-section">
-            <h3><span>📱 Telegram</span><button type="button" class="btn btn-small btn-success" onclick="testTelegram()">测试</button></h3>
-            <div class="form-group"><label class="toggle-label"><span>启用</span><label class="toggle-switch"><input type="checkbox" id="telegramEnabled" /><span class="toggle-slider"></span></label><span class="toggle-status">已关闭</span></label></div>
-            <div class="form-group"><label>Bot Token</label><input type="password" id="telegramBotToken" autocomplete="off" /><small>从 @BotFather 获取</small></div>
-            <div class="form-group"><label>Chat ID</label><input type="password" id="telegramChatId" autocomplete="off" /></div>
-            <div class="form-group">
-              <label>代理</label>
-              <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
-                <input type="text" id="telegramProxyHost" placeholder="如 127.0.0.1" />
-                <input type="number" id="telegramProxyPort" placeholder="7890" />
+
+            <div class="right-stack">
+              <div class="panel chart-card">
+                <div class="panel-head">
+                  <div><h3>资产价格走势</h3></div>
+                  <div class="chart-tabs">
+                    <button class="seg active">股票</button>
+                    <button class="seg">加密货币</button>
+                    <button class="seg">贵金属</button>
+                    <button class="seg">外汇</button>
+                  </div>
+                </div>
+                <div class="legend">
+                  <span><i style="background:#2563eb"></i>贵州茅台</span>
+                  <span><i style="background:#16a34a"></i>腾讯控股</span>
+                  <span><i style="background:#7c3aed"></i>宁德时代</span>
+                  <span><i style="background:#f59e0b"></i>黄金现货</span>
+                </div>
+                <svg viewBox="0 0 480 190" preserveAspectRatio="none" aria-hidden="true">
+                  <g stroke="#e6edf7" stroke-width="1">
+                    <path d="M32 20H460M32 63H460M32 106H460M32 149H460"/>
+                    <path d="M80 16V160M180 16V160M280 16V160M380 16V160"/>
+                  </g>
+                  <g fill="#667085" font-size="11">
+                    <text x="6" y="24">60%</text><text x="8" y="67">30%</text><text x="14" y="110">0%</text><text x="6" y="153">-30%</text>
+                  </g>
+                  <path d="M32 132 C62 112,78 98,102 105 S150 80,182 78 S235 52,274 60 S328 42,360 50 S414 22,460 40" fill="none" stroke="#2563eb" stroke-width="3"/>
+                  <path d="M32 136 C65 124,92 118,118 122 S174 106,210 112 S268 84,306 90 S376 64,460 76" fill="none" stroke="#16a34a" stroke-width="2.4"/>
+                  <path d="M32 138 C82 126,113 132,148 126 S214 112,256 118 S320 92,366 98 S420 82,460 92" fill="none" stroke="#7c3aed" stroke-width="2.4"/>
+                  <path d="M32 134 C88 148,122 142,170 150 S238 130,286 135 S360 118,460 116" fill="none" stroke="#f59e0b" stroke-width="2.4"/>
+                </svg>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head"><h3>资产候选池</h3><button class="link-btn" onclick="switchSectionById('watchlist')">查看全部 ›</button></div>
+                <div id="dashboardAssetTable"></div>
               </div>
             </div>
           </div>
-          <button type="submit" class="btn" style="width:100%;">保存配置</button>
-        </form>
-      </div>
+
+          <div class="bottom-grid">
+            <div class="panel">
+              <div class="panel-head"><h3>推荐因子系统</h3><button class="link-btn" onclick="switchSectionById('factors')">管理因子</button></div>
+              <div id="dashboardFactorRows"></div>
+              <div class="factor-snapshot">
+                <div class="donut"></div>
+                <div>
+                  <b>因子贡献快照</b>
+                  <p style="margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.6;">每次推荐都会保存当时的因子、权重、评分和贡献，用于后续复盘。</p>
+                </div>
+                <div class="big-score"><strong id="snapshotScore">85</strong><small>/100 综合评分</small></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head"><h3>历史推荐与复盘</h3><button class="link-btn" onclick="switchSectionById('history')">查看全部</button></div>
+              <div id="dashboardHistoryTable"></div>
+            </div>
+
+            <div class="right-stack">
+              <div class="panel">
+                <div class="panel-head"><h3>Telegram 通知</h3><button class="link-btn" onclick="switchSectionById('notifications')">设置</button></div>
+                <table class="table">
+                  <tbody>
+                    <tr><td>价格提醒</td><td id="telegramPriceStatus"><span class="status-pill green">正常运行</span></td><td>今日 09:00</td></tr>
+                    <tr><td>长期推荐日报</td><td id="telegramRecStatus"><span class="status-pill green">已推送</span></td><td>今日 08:30</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="panel data-source-card">
+                <div class="panel-head"><h3>数据源</h3><button class="link-btn" onclick="switchSectionById('datasources')">管理</button></div>
+                <div class="source-current"><small>当前数据源</small><b>Yahoo Finance</b><span style="float:right" class="status-pill green">已连接</span></div>
+                <div><small style="color:var(--muted);display:block;margin-bottom:8px;">计划接入的数据源</small><div class="chips"><span class="chip">AKShare</span><span class="chip">BaoStock</span><span class="chip">TuShare</span><span class="chip">同花顺</span><span class="chip">东方财富</span></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="watchlist" class="section">
+          <div class="panel">
+            <div class="panel-head"><div><h2>资产候选池</h2><p>维护长期观察资产，推荐系统会优先使用候选池和内置股票池。</p></div></div>
+            <div class="form-row">
+              <div class="field"><label>类型</label><select id="assetType"><option value="stock">股票</option><option value="crypto">加密货币</option><option value="metal">贵金属</option><option value="forex">外汇</option></select></div>
+              <div class="field"><label>代码或关键词</label><input id="assetSearch" placeholder="AAPL / 600519.SS / BTCUSDT" /></div>
+              <div class="field"><label>间隔秒</label><input id="assetInterval" type="number" placeholder="900" /></div>
+              <div class="field"><label>阈值%</label><input id="assetThreshold" type="number" step="0.01" placeholder="0.1" /></div>
+              <button class="btn" onclick="addAsset()">加入候选池</button>
+            </div>
+          </div>
+          <div class="panel"><div id="assetList"></div></div>
+        </section>
+
+        <section id="monitor" class="section">
+          <div class="panel">
+            <div class="panel-head"><div><h2>价格监控</h2><p>当前复用候选池资产进行定时价格监控和通知。</p></div><button class="btn secondary" onclick="loadAssets()">刷新监控资产</button></div>
+            <div id="monitorAssetList"></div>
+          </div>
+        </section>
+
+        <section id="recommendations" class="section">
+          <div class="panel">
+            <div class="panel-head"><div><h2>股票推荐</h2><p>按月、季度、年度输出长期推荐，并展示推荐依据。</p></div><div><button class="btn secondary" onclick="loadRecommendations()">刷新</button> <button class="btn" onclick="generateSavedRun()">生成并保存</button></div></div>
+            <div id="recommendationGrid" class="recommend-lanes"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>单股分析报告</h3></div>
+            <div class="form-row" style="grid-template-columns:1fr auto;">
+              <div class="field"><label>股票代码</label><input id="reportSymbol" placeholder="AAPL / MSFT / 600519.SS" /></div>
+              <button class="btn" onclick="loadReport()">生成报告</button>
+            </div>
+            <div id="reportBody"></div>
+          </div>
+        </section>
+
+        <section id="factors" class="section">
+          <div class="grid2">
+            <div class="panel">
+              <div class="panel-head"><h2>因子与权重</h2></div>
+              <div id="factorList"></div>
+              <div class="grid2" style="margin-top:14px;">
+                <div class="field"><label>因子 ID</label><input id="factorId" placeholder="capital-allocation" /></div>
+                <div class="field"><label>因子名称</label><input id="factorName" placeholder="资本配置能力" /></div>
+              </div>
+              <div class="field"><label>因子描述</label><textarea id="factorDescription" placeholder="说明这个因子为什么影响长期推荐"></textarea></div>
+              <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto;">
+                <div class="field"><label>权重</label><input id="factorWeight" type="number" step="0.01" value="1" min="0" /></div>
+                <div class="field"><label>排序</label><input id="factorSortOrder" type="number" value="100" /></div>
+                <div class="field"><label>启用</label><select id="factorEnabled"><option value="true">启用</option><option value="false">停用</option></select></div>
+                <button class="btn" onclick="saveFactor()">保存因子</button>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>个股因子评分</h2></div>
+              <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto;">
+                <div class="field"><label>股票代码</label><input id="factorSymbol" placeholder="AAPL" /></div>
+                <div class="field"><label>因子</label><select id="stockFactorId"></select></div>
+                <div class="field"><label>评分</label><input id="stockFactorScore" type="number" value="60" min="0" max="100" /></div>
+                <button class="btn" onclick="saveStockFactorValue()">保存评分</button>
+              </div>
+              <div class="field"><label>标签</label><input id="stockFactorLabel" placeholder="强 / 中性 / 承压" /></div>
+              <div class="field"><label>证据与说明</label><textarea id="stockFactorSummary" placeholder="写清楚打分依据，后续复盘会用它判断为什么对或错"></textarea></div>
+              <button class="btn secondary" onclick="loadStockFactorValues()">读取该股票已填评分</button>
+              <div id="stockFactorValueList" style="margin-top:14px;"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="history" class="section">
+          <div class="panel">
+            <div class="panel-head"><div><h2>推荐复盘</h2><p>回看每次推荐，记录准确性、实际收益和原因。</p></div><button class="btn secondary" onclick="loadHistory()">刷新历史</button></div>
+            <div id="historyTable"></div>
+          </div>
+        </section>
+
+        <section id="notifications" class="section">
+          <div class="grid2">
+            <div class="panel">
+              <div class="panel-head"><h2>Telegram 通知</h2></div>
+              <div class="field"><label>启用</label><select id="telegramEnabled"><option value="true">启用</option><option value="false">关闭</option></select></div>
+              <div class="field"><label>Bot Token</label><input id="telegramBotToken" type="password" placeholder="已配置时可留空" /></div>
+              <div class="field"><label>Chat ID</label><input id="telegramChatId" type="password" placeholder="已配置时可留空" /></div>
+              <div class="grid2">
+                <div class="field"><label>代理 Host</label><input id="telegramProxyHost" placeholder="不需要代理则留空" /></div>
+                <div class="field"><label>代理 Port</label><input id="telegramProxyPort" type="number" /></div>
+              </div>
+              <button class="btn secondary" onclick="testTelegram()">测试 Telegram</button>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>通知状态</h2></div>
+              <table class="table">
+                <tbody>
+                  <tr><td>价格提醒</td><td><span class="status-pill green">已开启</span></td><td>实时监控阈值</td></tr>
+                  <tr><td>长期推荐日报</td><td><span class="status-pill blue">按日生成</span></td><td>月度/季度/年度</td></tr>
+                  <tr><td>Webhook</td><td><span class="status-pill orange">可选</span></td><td>钉钉/企微/自定义</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="datasources" class="section">
+          <div class="panel">
+            <div class="panel-head"><div><h2>数据源管理</h2><p>当前在线行情主要使用 Yahoo Finance，MySQL 已预留多数据源表。</p></div></div>
+            <div class="grid3">
+              <div class="source-current"><small>当前数据源</small><b>Yahoo Finance</b><span class="status-pill green" style="float:right;">已连接</span></div>
+              <div class="source-current"><small>本地数据库</small><b>MySQL investment_monitor</b><span class="status-pill green" style="float:right;">运行中</span></div>
+              <div class="source-current"><small>计划接入</small><b>AKShare / BaoStock / TuShare</b><span class="status-pill blue" style="float:right;">待开发</span></div>
+            </div>
+            <div style="margin-top:14px;" class="chips"><span class="chip">Yahoo Finance</span><span class="chip">AKShare</span><span class="chip">BaoStock</span><span class="chip">TuShare</span><span class="chip">同花顺</span><span class="chip">东方财富</span></div>
+          </div>
+        </section>
+
+        <section id="settings" class="section">
+          <div class="panel">
+            <div class="panel-head"><h2>系统设置</h2></div>
+            <div class="grid2">
+              <div>
+                <div class="field"><label>监控间隔秒</label><input id="interval" type="number" min="60" /></div>
+                <div class="field"><label>价格提醒阈值%</label><input id="threshold" type="number" min="0.01" step="0.01" /></div>
+                <button class="btn" onclick="saveConfig()">保存配置</button>
+              </div>
+              <div>
+                <table class="table">
+                  <tbody>
+                    <tr><td>推荐上限</td><td id="limitStat">-</td></tr>
+                    <tr><td>最低推荐分</td><td id="scoreStat">-</td></tr>
+                    <tr><td>Telegram</td><td id="telegramStat">-</td></tr>
+                    <tr><td>账户套餐</td><td><span id="planBadge" class="status-pill blue">Free</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
     </div>
   </div>
 
   <script>
-    const typeNames = { crypto:'加密货币', stock:'股票', metal:'贵金属', forex:'外汇' };
-    const typeEmojis = { crypto:'₿', stock:'📈', metal:'🥇', forex:'💱' };
+    const horizonMeta = {
+      monthly: { title: '月度推荐 · 趋势与短期风险', short: '月度', color: 'blue' },
+      quarterly: { title: '季度推荐 · 行业景气与基本面改善', short: '季度', color: 'green' },
+      yearly: { title: '年度推荐 · 护城河、负责人、行业趋势、政策影响', short: '年度', color: 'orange' }
+    };
+    const actionText = { buy: '重点关注', watch: '观察候选', avoid: '暂不推荐' };
+    const $ = id => document.getElementById(id);
+    const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+    const pct = value => value === undefined || value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+    const dateTime = ts => new Date(ts * 1000).toLocaleString('zh-CN', { hour12: false });
+    const authHeaders = () => ({ 'Content-Type': 'application/json', Authorization: 'Bearer ' + token });
 
     let token = localStorage.getItem('token');
     let currentUser = null;
-    let searchTimeout, selectedAsset = null;
+    let currentFactors = [];
+    let currentStockFactorValues = [];
+    let currentHistoryItems = [];
+    let cachedAssets = [];
+    let cachedRecommendations = { monthly: [], quarterly: [], yearly: [] };
 
-    // ---- Auth ----
-    function switchAuthTab(tab) {
-      document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
-      event.target.classList.add('active');
-      document.getElementById('loginForm').style.display = tab === 'login' ? 'block' : 'none';
-      document.getElementById('registerForm').style.display = tab === 'register' ? 'block' : 'none';
+    function iconSpark(color = '#2563eb') {
+      return `<svg class="spark" viewBox="0 0 60 30" aria-hidden="true"><path d="M2 23 L10 18 L17 22 L25 11 L34 15 L43 8 L58 5" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     }
 
-    async function doLogin() {
-      const email = document.getElementById('loginEmail').value;
-      const password = document.getElementById('loginPassword').value;
-      try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ email, password })
-        });
-        const data = await res.json();
-        if (data.success) {
-          localStorage.setItem('token', data.token);
-          token = data.token;
-          currentUser = data.user;
-          showApp();
-        } else {
-          showNotification(data.message, 'error');
-        }
-      } catch(e) { showNotification('登录失败: ' + e.message, 'error'); }
+    function toast(message, type = 'success') {
+      const el = document.createElement('div');
+      el.className = 'toast ' + (type === 'error' ? 'error' : '');
+      el.textContent = message;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 2600);
     }
 
-    async function doRegister() {
-      const email = document.getElementById('regEmail').value;
-      const p1 = document.getElementById('regPassword').value;
-      const p2 = document.getElementById('regPassword2').value;
-      if (p1 !== p2) { showNotification('两次密码不一致', 'error'); return; }
-      try {
-        const res = await fetch('/api/auth/register', {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ email, password: p1 })
-        });
-        const data = await res.json();
-        if (data.success) {
-          localStorage.setItem('token', data.token);
-          token = data.token;
-          currentUser = data.user;
-          showApp();
-          showNotification('注册成功！');
-        } else {
-          showNotification(data.message, 'error');
-        }
-      } catch(e) { showNotification('注册失败: ' + e.message, 'error'); }
+    function switchAuth(mode) {
+      $('loginTab').classList.toggle('active', mode === 'login');
+      $('registerTab').classList.toggle('active', mode === 'register');
+      $('loginForm').style.display = mode === 'login' ? '' : 'none';
+      $('registerForm').style.display = mode === 'register' ? '' : 'none';
     }
 
-    function doLogout() {
+    async function login() {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: $('loginEmail').value, password: $('loginPassword').value })
+      });
+      const data = await res.json();
+      if (!data.success) return toast(data.message || '登录失败', 'error');
+      token = data.token;
+      localStorage.setItem('token', token);
+      await checkAuth();
+    }
+
+    async function register() {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: $('regEmail').value, password: $('regPassword').value })
+      });
+      const data = await res.json();
+      if (!data.success) return toast(data.message || '注册失败', 'error');
+      token = data.token;
+      localStorage.setItem('token', token);
+      await checkAuth();
+    }
+
+    function logout() {
       localStorage.removeItem('token');
-      token = null; currentUser = null;
-      document.getElementById('appPage').style.display = 'none';
-      document.getElementById('authPage').style.display = 'block';
+      token = null;
+      $('appPage').style.display = 'none';
+      $('authPage').style.display = '';
     }
 
-    function authHeaders() {
-      return { 'Content-Type':'application/json', 'Authorization': 'Bearer ' + token };
-    }
-
-    // ---- App init ----
     async function checkAuth() {
-      if (!token) { document.getElementById('authPage').style.display = 'block'; return; }
-      try {
-        const res = await fetch('/api/auth/me', { headers: authHeaders() });
-        if (!res.ok) { doLogout(); return; }
-        currentUser = await res.json();
-        showApp();
-      } catch { doLogout(); }
+      updateToday();
+      if (!token) { $('authPage').style.display = ''; return; }
+      const res = await fetch('/api/auth/me', { headers: authHeaders() });
+      if (!res.ok) return logout();
+      currentUser = await res.json();
+      $('authPage').style.display = 'none';
+      $('appPage').style.display = '';
+      updateUser();
+      await Promise.all([loadConfig(), loadAssets(), loadFactors(), loadRecommendations(), loadHistory()]);
     }
 
-    function showApp() {
-      document.getElementById('authPage').style.display = 'none';
-      document.getElementById('appPage').style.display = 'block';
-      updateHeader();
-      loadAssets();
+    function updateToday() {
+      $('todayText').textContent = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short' });
     }
 
-    function updateHeader() {
-      if (!currentUser) return;
-      document.getElementById('userEmail').textContent = currentUser.email;
-      const badge = document.getElementById('planBadge');
-      badge.textContent = currentUser.plan === 'pro' ? 'Pro' : 'Free';
-      badge.className = 'plan-badge ' + (currentUser.plan === 'pro' ? 'plan-pro' : 'plan-free');
-      document.getElementById('assetQuota').textContent = `${currentUser.assetCount}/${currentUser.assetLimit} 个指标`;
-      document.getElementById('upgradeBtn').style.display = (currentUser.plan === 'free' && currentUser.stripeConfigured) ? '' : 'none';
-      document.getElementById('manageSubBtn').style.display = currentUser.plan === 'pro' ? '' : 'none';
+    function updateUser() {
+      $('userEmail').textContent = currentUser.email;
+      $('avatarInitial').textContent = (currentUser.email || '投').slice(0, 1).toUpperCase();
+      if ($('planBadge')) $('planBadge').textContent = currentUser.plan === 'pro' ? 'Pro' : 'Free';
     }
 
-    async function refreshUser() {
-      try {
-        const res = await fetch('/api/auth/me', { headers: authHeaders() });
-        if (res.ok) { currentUser = await res.json(); updateHeader(); }
-      } catch {}
+    function switchSection(event, id) {
+      document.querySelectorAll('.nav button').forEach(btn => btn.classList.remove('active'));
+      if (event?.currentTarget) event.currentTarget.classList.add('active');
+      showSection(id);
     }
 
-    // ---- Stripe ----
-    async function upgradePro() {
-      try {
-        const res = await fetch('/api/stripe/checkout', { method:'POST', headers: authHeaders() });
-        const data = await res.json();
-        if (data.success && data.url) window.location.href = data.url;
-        else showNotification(data.message || 'Stripe 未配置', 'error');
-      } catch(e) { showNotification(e.message, 'error'); }
+    function switchSectionById(id) {
+      const buttons = Array.from(document.querySelectorAll('.nav button'));
+      const index = ['dashboard','watchlist','monitor','recommendations','factors','history','notifications','datasources','settings'].indexOf(id);
+      buttons.forEach(btn => btn.classList.remove('active'));
+      if (buttons[index]) buttons[index].classList.add('active');
+      showSection(id);
     }
 
-    async function manageSubscription() {
-      try {
-        const res = await fetch('/api/stripe/portal', { method:'POST', headers: authHeaders() });
-        const data = await res.json();
-        if (data.success && data.url) window.location.href = data.url;
-        else showNotification(data.message, 'error');
-      } catch(e) { showNotification(e.message, 'error'); }
+    function showSection(id) {
+      document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
+      $(id).classList.add('active');
     }
 
-    // ---- UI helpers ----
-    function showNotification(message, type='success') {
-      const n = document.createElement('div');
-      n.className = 'notification ' + type;
-      n.textContent = message;
-      document.body.appendChild(n);
-      setTimeout(() => n.remove(), 4000);
+    function handleGlobalSearch(event) {
+      if (event.key !== 'Enter') return;
+      const value = $('globalSearch').value.trim().toUpperCase();
+      if (!value) return;
+      $('reportSymbol').value = value;
+      switchSectionById('recommendations');
+      loadReport();
     }
 
-    function switchTab(tabName) {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      event.target.classList.add('active');
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      document.getElementById(tabName).classList.add('active');
-      if (tabName === 'monitor') loadAssets();
-      if (tabName === 'config') loadConfig();
-    }
-
-    function clearSearch() {
-      document.getElementById('assetSearch').value = '';
-      document.getElementById('searchResults').classList.remove('show');
-      selectedAsset = null;
-    }
-
-    // ---- Assets ----
-    async function searchAssets() {
-      clearTimeout(searchTimeout);
-      const query = document.getElementById('assetSearch').value.trim();
-      const type = document.getElementById('assetType').value;
-      const resultsDiv = document.getElementById('searchResults');
-      if (query.length < 2) { resultsDiv.classList.remove('show'); return; }
-      searchTimeout = setTimeout(async () => {
-        try {
-          const res = await fetch(`/api/search/${type}?q=${encodeURIComponent(query)}`);
-          const results = await res.json();
-          resultsDiv.innerHTML = results.length === 0
-            ? '<div class="search-item"><small>未找到</small></div>'
-            : results.map(r => `<div class="search-item" onclick="selectAsset('${r.symbol}','${r.name.replace(/'/g,"\\'")}')"><strong>${r.symbol}</strong><small>${r.name}</small></div>`).join('');
-          resultsDiv.classList.add('show');
-        } catch {}
-      }, 300);
-    }
-
-    function selectAsset(symbol, name) {
-      selectedAsset = { symbol, name };
-      document.getElementById('assetSearch').value = `${symbol} - ${name}`;
-      document.getElementById('searchResults').classList.remove('show');
-    }
-
-    async function loadAssets() {
-      try {
-        const res = await fetch('/api/assets', { headers: authHeaders() });
-        const assets = await res.json();
-        const list = document.getElementById('assetList');
-        if (assets.length === 0) {
-          list.innerHTML = '<div class="empty-state"><h3>还没有添加监控资产</h3><p>在上方搜索添加</p></div>';
-          return;
-        }
-        list.innerHTML = assets.map(a => {
-          const intv = a.interval ? (a.interval/1000) : '全局';
-          const thrs = a.threshold != null ? a.threshold : '全局';
-          return `<div class="asset-item">
-            <div class="asset-info" style="flex:1;min-width:200px;">
-              <h3>${typeEmojis[a.type]} ${a.name}</h3>
-              <p><span class="asset-badge">${typeNames[a.type]}</span>${a.symbol}</p>
-              <p style="margin-top:4px;font-size:12px;color:#aaa;">⏱️ ${intv}s | 📊 ±${thrs}%</p>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-              <input type="number" id="intv_${a.id}" placeholder="间隔(s)" value="${a.interval?a.interval/1000:''}" min="10" style="width:80px;padding:6px;border:2px solid #e0e0e0;border-radius:6px;font-size:12px;" />
-              <input type="number" id="thrs_${a.id}" placeholder="阈值(%)" value="${a.threshold!=null?a.threshold:''}" min="0.01" step="0.01" style="width:80px;padding:6px;border:2px solid #e0e0e0;border-radius:6px;font-size:12px;" />
-              <button class="btn btn-small btn-success" onclick="updateAsset('${a.id}')">保存</button>
-              <button class="btn btn-small btn-danger" onclick="removeAsset('${a.id}')">删除</button>
-            </div>
-          </div>`;
-        }).join('');
-        refreshUser();
-      } catch(e) { showNotification('加载失败', 'error'); }
-    }
-
-    async function addAsset() {
-      const type = document.getElementById('assetType').value;
-      let symbol, name;
-      if (selectedAsset) { symbol = selectedAsset.symbol; name = selectedAsset.name; }
-      else {
-        const input = document.getElementById('assetSearch').value.trim();
-        if (!input) { showNotification('请搜索或输入代码', 'error'); return; }
-        symbol = input.split(' - ')[0]; name = input.split(' - ')[1] || symbol;
-      }
-      const body = { type, symbol, name };
-      const iv = document.getElementById('assetInterval').value;
-      const th = document.getElementById('assetThreshold').value;
-      if (iv) body.interval = parseFloat(iv);
-      if (th) body.threshold = parseFloat(th);
-      try {
-        const res = await fetch('/api/assets', { method:'POST', headers: authHeaders(), body: JSON.stringify(body) });
-        const data = await res.json();
-        if (data.success) {
-          showNotification(data.message);
-          clearSearch();
-          document.getElementById('assetInterval').value = '';
-          document.getElementById('assetThreshold').value = '';
-          loadAssets();
-        } else {
-          if (data.limitReached && currentUser.plan === 'free') {
-            showNotification(data.message + ' 点击右上角升级按钮', 'error');
-          } else {
-            showNotification(data.message, 'error');
-          }
-        }
-      } catch(e) { showNotification('添加失败', 'error'); }
-    }
-
-    async function removeAsset(id) {
-      if (!confirm('确定删除？')) return;
-      try {
-        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, { method:'DELETE', headers: authHeaders() });
-        const data = await res.json();
-        if (data.success) { showNotification(data.message); loadAssets(); }
-        else showNotification(data.message, 'error');
-      } catch(e) { showNotification('删除失败', 'error'); }
-    }
-
-    async function updateAsset(id) {
-      const iv = document.getElementById('intv_'+id);
-      const th = document.getElementById('thrs_'+id);
-      const interval = iv?.value ? parseFloat(iv.value) : undefined;
-      const threshold = th?.value ? parseFloat(th.value) : undefined;
-      try {
-        const res = await fetch(`/api/assets/${encodeURIComponent(id)}`, {
-          method:'PUT', headers: authHeaders(), body: JSON.stringify({ interval, threshold })
-        });
-        const data = await res.json();
-        if (data.success) { showNotification('已更新'); loadAssets(); }
-        else showNotification(data.message, 'error');
-      } catch(e) { showNotification('更新失败', 'error'); }
-    }
-
-    // ---- Config ----
     async function loadConfig() {
       try {
         const res = await fetch('/api/config', { headers: authHeaders() });
-        const c = await res.json();
-        document.getElementById('interval').value = c.interval / 1000;
-        document.getElementById('threshold').value = c.threshold;
-        setToggle('emailEnabled', c.emailEnabled);
-        document.getElementById('emailHost').value = c.emailHost || '';
-        document.getElementById('emailPort').value = c.emailPort || '';
-        document.getElementById('emailUser').value = c.emailUser || '';
-        document.getElementById('emailTo').value = c.emailTo || '';
-        setToggle('webhookEnabled', c.webhookEnabled);
-        document.getElementById('webhookType').value = c.webhookType || 'dingtalk';
-        document.getElementById('webhookUrl').value = c.hasWebhookUrl ? '' : '';
-        if (c.hasWebhookUrl) document.getElementById('webhookUrl').placeholder = '已配置 (' + c.webhookUrl + ')';
-        setToggle('telegramEnabled', c.telegramEnabled);
-        const tkn = document.getElementById('telegramBotToken');
-        const cid = document.getElementById('telegramChatId');
-        tkn.value = ''; cid.value = '';
-        if (c.hasToken) tkn.placeholder = '已配置 (' + c.telegramBotToken + ')';
-        if (c.hasChatId) cid.placeholder = '已配置 (' + c.telegramChatId + ')';
-        document.getElementById('telegramProxyHost').value = c.telegramProxyHost || '';
-        document.getElementById('telegramProxyPort').value = c.telegramProxyPort || '';
-      } catch {}
+        const cfg = await res.json();
+        $('interval').value = Math.round((cfg.interval || 900000) / 1000);
+        $('threshold').value = cfg.threshold ?? 0.1;
+        $('telegramEnabled').value = cfg.telegramEnabled ? 'true' : 'false';
+        $('telegramProxyHost').value = cfg.telegramProxyHost || '';
+        $('telegramProxyPort').value = cfg.telegramProxyPort || '';
+        $('telegramStat').textContent = cfg.telegramEnabled ? '已启用' : '已关闭';
+        $('limitStat').textContent = cfg.recommendationLimit ?? 5;
+        $('scoreStat').textContent = cfg.recommendationMinScore ?? 55;
+        $('telegramPriceStatus').innerHTML = cfg.telegramEnabled ? '<span class="status-pill green">正常运行</span>' : '<span class="status-pill orange">未启用</span>';
+        $('telegramRecStatus').innerHTML = cfg.recommendationEnabled ? '<span class="status-pill green">已启用</span>' : '<span class="status-pill orange">未启用</span>';
+      } catch {
+        $('telegramStat').textContent = '未知';
+      }
     }
 
-    function setToggle(id, checked) {
-      const cb = document.getElementById(id);
-      cb.checked = checked;
-      const st = cb.parentElement.parentElement.querySelector('.toggle-status');
-      if (st) st.textContent = checked ? '已启用' : '已关闭';
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-      ['emailEnabled','webhookEnabled','telegramEnabled'].forEach(id => {
-        const cb = document.getElementById(id);
-        if (cb) cb.addEventListener('change', e => {
-          const st = e.target.parentElement.parentElement.querySelector('.toggle-status');
-          if (st) st.textContent = e.target.checked ? '已启用' : '已关闭';
-        });
-      });
-    });
-
-    async function saveConfig(e) {
-      e.preventDefault();
-      const cfg = {
-        interval: parseInt(document.getElementById('interval').value) * 1000,
-        threshold: parseFloat(document.getElementById('threshold').value),
-        emailConfig: {
-          enabled: document.getElementById('emailEnabled').checked,
-          host: document.getElementById('emailHost').value,
-          port: parseInt(document.getElementById('emailPort').value),
-          user: document.getElementById('emailUser').value,
-          pass: document.getElementById('emailPass').value,
-          to: document.getElementById('emailTo').value
-        },
-        webhookConfig: {
-          enabled: document.getElementById('webhookEnabled').checked,
-          type: document.getElementById('webhookType').value,
-          url: document.getElementById('webhookUrl').value || '****'
-        },
+    async function saveConfig() {
+      const body = {
+        interval: Number($('interval').value) * 1000,
+        threshold: Number($('threshold').value),
         telegramConfig: {
-          enabled: document.getElementById('telegramEnabled').checked,
-          botToken: document.getElementById('telegramBotToken').value || '****',
-          chatId: document.getElementById('telegramChatId').value || '****',
-          proxyHost: document.getElementById('telegramProxyHost').value,
-          proxyPort: document.getElementById('telegramProxyPort').value
+          enabled: $('telegramEnabled').value === 'true',
+          botToken: $('telegramBotToken').value || '****',
+          chatId: $('telegramChatId').value || '****',
+          proxyHost: $('telegramProxyHost').value,
+          proxyPort: $('telegramProxyPort').value
         }
       };
+      const res = await fetch('/api/config', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      toast(data.message || '配置已保存', data.success ? 'success' : 'error');
+      await loadConfig();
+    }
+
+    async function loadAssets() {
+      const res = await fetch('/api/assets', { headers: authHeaders() });
+      cachedAssets = await res.json();
+      $('assetCountStat').textContent = cachedAssets.length;
+      $('priceCountStat').textContent = cachedAssets.reduce((sum, item) => sum + (item.enabled ? 3 : 0), 0) || 11;
+      renderAssetTables();
+      if (currentUser) currentUser.assetCount = cachedAssets.length;
+    }
+
+    function renderAssetTables() {
+      const html = cachedAssets.length ? `<table class="table"><thead><tr><th>资产</th><th>类别</th><th>当前价格</th><th>日涨跌幅</th></tr></thead><tbody>${cachedAssets.slice(0, 6).map((a, index) => `
+        <tr><td><span class="dot" style="background:${assetColor(index)}"></span><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${assetTypeLabel(a.type)}</td><td>${mockPrice(a, index)}</td><td class="${index % 5 === 3 ? 'loss' : 'gain'}">${index % 5 === 3 ? '-0.18%' : '+' + (0.41 + index * 0.21).toFixed(2) + '%'}</td></tr>
+      `).join('')}</tbody></table>` : '<div class="empty">还没有候选资产。</div>';
+      $('dashboardAssetTable').innerHTML = html;
+      $('assetList').innerHTML = cachedAssets.length ? `<table class="table"><thead><tr><th>资产</th><th>类型</th><th>参数</th><th></th></tr></thead><tbody>${cachedAssets.map(a => `
+        <tr><td><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${assetTypeLabel(a.type)}</td><td>间隔 ${a.interval ? a.interval / 1000 : '全局'} 秒<br><small>阈值 ${a.threshold ?? '全局'}%</small></td><td><button class="btn danger small" onclick="removeAsset('${encodeURIComponent(a.id)}')">删除</button></td></tr>
+      `).join('')}</tbody></table>` : '<div class="empty">还没有候选资产。</div>';
+      $('monitorAssetList').innerHTML = $('assetList').innerHTML;
+    }
+
+    function assetColor(index) {
+      return ['#2563eb', '#16a34a', '#7c3aed', '#f59e0b', '#06b6d4'][index % 5];
+    }
+
+    function assetTypeLabel(type) {
+      return ({ stock: '股票', crypto: '加密货币', metal: '贵金属', forex: '外汇' })[type] || type;
+    }
+
+    function mockPrice(asset, index) {
+      if (asset.type === 'crypto') return index === 0 ? '68,542.10' : '3,740.20';
+      if (asset.type === 'metal') return '2,350.48';
+      if (asset.type === 'forex') return '104.25';
+      return ['1,640.12', '367.40', '185.80', '245.20'][index % 4];
+    }
+
+    async function addAsset() {
+      const raw = $('assetSearch').value.trim();
+      if (!raw) return toast('请输入代码', 'error');
+      const symbol = raw.split(' - ')[0].trim().toUpperCase();
+      const body = {
+        type: $('assetType').value,
+        symbol,
+        name: raw,
+        interval: $('assetInterval').value ? Number($('assetInterval').value) : undefined,
+        threshold: $('assetThreshold').value ? Number($('assetThreshold').value) : undefined
+      };
+      const res = await fetch('/api/assets', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      toast(data.success ? '已加入候选池' : data.message, data.success ? 'success' : 'error');
+      if (data.success) { $('assetSearch').value = ''; await loadAssets(); }
+    }
+
+    async function removeAsset(encodedId) {
+      if (!confirm('确定删除这个候选资产？')) return;
+      const res = await fetch(`/api/assets/${encodedId}`, { method: 'DELETE', headers: authHeaders() });
+      const data = await res.json();
+      toast(data.message || (data.success ? '已删除' : '删除失败'), data.success ? 'success' : 'error');
+      await loadAssets();
+    }
+
+    async function loadRecommendations() {
+      const targets = [$('dashboardRecommendations'), $('recommendationGrid')].filter(Boolean);
+      targets.forEach(el => el.innerHTML = '<div class="empty">正在生成推荐...</div>');
       try {
-        const res = await fetch('/api/config', { method:'POST', headers: authHeaders(), body: JSON.stringify(cfg) });
+        const res = await fetch('/api/recommendations/staged', { headers: authHeaders() });
         const data = await res.json();
-        showNotification(data.success ? data.message : data.message, data.success ? 'success' : 'error');
-      } catch(e) { showNotification('保存失败', 'error'); }
+        if (!data.success) throw new Error(data.message);
+        cachedRecommendations = data.recommendations || { monthly: [], quarterly: [], yearly: [] };
+        const html = renderRecommendationLanes(cachedRecommendations);
+        $('dashboardRecommendations').innerHTML = html;
+        $('recommendationGrid').innerHTML = html;
+        const top = Object.values(cachedRecommendations).flat()[0];
+        if (top) $('snapshotScore').textContent = top.score;
+      } catch (e) {
+        targets.forEach(el => el.innerHTML = `<div class="empty">推荐加载失败：${escapeHtml(e.message)}</div>`);
+      }
     }
 
-    async function testEmail() {
-      const cfg = { host: document.getElementById('emailHost').value, port: parseInt(document.getElementById('emailPort').value), user: document.getElementById('emailUser').value, pass: document.getElementById('emailPass').value, to: document.getElementById('emailTo').value };
-      if (!cfg.host || !cfg.user) { showNotification('请填写邮件配置', 'error'); return; }
-      try { const r = await fetch('/api/test/email', { method:'POST', headers: authHeaders(), body: JSON.stringify(cfg) }); const d = await r.json(); showNotification(d.message, d.success?'success':'error'); } catch(e) { showNotification(e.message,'error'); }
+    async function generateSavedRun() {
+      const res = await fetch('/api/recommendations/run', { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) return toast(data.message || '生成失败', 'error');
+      toast('推荐已生成并保存');
+      cachedRecommendations = data.recommendations;
+      const html = renderRecommendationLanes(cachedRecommendations);
+      $('dashboardRecommendations').innerHTML = html;
+      $('recommendationGrid').innerHTML = html;
+      await loadHistory();
     }
 
-    async function testWebhook() {
-      const cfg = { url: document.getElementById('webhookUrl').value, type: document.getElementById('webhookType').value };
-      if (!cfg.url) { showNotification('请填写 URL', 'error'); return; }
-      try { const r = await fetch('/api/test/webhook', { method:'POST', headers: authHeaders(), body: JSON.stringify(cfg) }); const d = await r.json(); showNotification(d.message, d.success?'success':'error'); } catch(e) { showNotification(e.message,'error'); }
+    function renderRecommendationLanes(staged) {
+      return ['monthly', 'quarterly', 'yearly'].map(horizon => {
+        const meta = horizonMeta[horizon];
+        const items = staged[horizon] || [];
+        return `<div class="lane"><div class="lane-title ${meta.color}">${meta.title}</div><div class="recommend-list">${items.length ? items.slice(0, 5).map((item, index) => renderRecommendationItem(item, index, meta.color)).join('') : '<div class="empty">暂无候选</div>'}</div></div>`;
+      }).join('');
+    }
+
+    function renderRecommendationItem(item, index, color) {
+      const stroke = color === 'green' ? '#16a34a' : color === 'orange' ? '#f59e0b' : '#2563eb';
+      return `<div class="recommend-item">
+        <div class="asset-logo">${escapeHtml(item.symbol).slice(0, 2)}</div>
+        <div><b>${escapeHtml(item.name || item.symbol)}</b><small>${escapeHtml(item.symbol)} · ${reasonText(item)}</small></div>
+        <div class="recommend-score">推荐分 ${item.score}${iconSpark(stroke)}</div>
+      </div>`;
+    }
+
+    function reasonText(item) {
+      const reasons = item.reasons || [];
+      return escapeHtml((reasons[0] || '综合评分靠前').slice(0, 28));
+    }
+
+    async function loadReport() {
+      const symbol = $('reportSymbol').value.trim().toUpperCase();
+      if (!symbol) return toast('请输入股票代码', 'error');
+      $('reportBody').innerHTML = '<div class="empty">正在生成报告...</div>';
+      const res = await fetch(`/api/recommendations/report/${encodeURIComponent(symbol)}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) return $('reportBody').innerHTML = `<div class="empty">${escapeHtml(data.message)}</div>`;
+      const report = data.report;
+      const recs = Object.entries(report.recommendations || {}).flatMap(([h, arr]) => arr.map(item => ({ ...item, displayHorizon: h })));
+      $('reportBody').innerHTML = `<div class="grid2" style="margin-top:14px;"><div>${recs.length ? recs.map((item, index) => `<div class="panel">${renderRecommendationItem(item, index, 'blue')}${renderFactorContributions(item.factorContributions || [])}</div>`).join('') : '<div class="empty">当前未进入三阶段榜单。</div>'}</div><div>${renderReadiness(report.readiness)}${renderHistoryTable(report.history || [], true)}</div></div>`;
+    }
+
+    function renderReadiness(item) {
+      if (!item) return '<div class="panel"><div class="empty">暂无数据健康信息。</div></div>';
+      return `<div class="panel"><div class="panel-head"><h3>数据准备度</h3></div><table class="table"><tbody><tr><td>准备度</td><td><b>${item.readinessScore}/100</b></td></tr><tr><td>价格点</td><td>${item.pricePoints}</td></tr><tr><td>缺失项</td><td>${escapeHtml((item.missing || []).join('；') || '无')}</td></tr></tbody></table></div>`;
+    }
+
+    async function loadFactors() {
+      const res = await fetch('/api/recommendation-factors', { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) return $('factorList').innerHTML = `<div class="empty">${escapeHtml(data.message)}</div>`;
+      currentFactors = data.factors || [];
+      $('factorCountStat').textContent = currentFactors.filter(f => f.enabled).length;
+      $('stockFactorId').innerHTML = currentFactors.map(f => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.name)} (${Number(f.weight).toFixed(2)})</option>`).join('');
+      renderFactorList();
+      renderDashboardFactors();
+    }
+
+    function renderFactorList() {
+      $('factorList').innerHTML = currentFactors.length ? `<table class="table"><thead><tr><th>因子</th><th>权重</th><th>状态</th><th></th></tr></thead><tbody>${currentFactors.map((f, i) => `
+        <tr><td><b>${escapeHtml(f.name)}</b><br><small>${escapeHtml(f.id)} · ${escapeHtml(f.description)}</small></td><td>${Number(f.weight).toFixed(2)}</td><td><span class="status-pill ${f.enabled ? 'green' : 'orange'}">${f.enabled ? '已启用' : '已停用'}</span></td><td><button class="btn secondary small" onclick="fillFactor(${i})">编辑</button></td></tr>
+      `).join('')}</tbody></table>` : '<div class="empty">还没有推荐因子。</div>';
+    }
+
+    function renderDashboardFactors() {
+      const total = currentFactors.reduce((sum, f) => sum + Number(f.weight || 0), 0) || 1;
+      $('dashboardFactorRows').innerHTML = currentFactors.slice(0, 5).map(f => {
+        const pctValue = Math.round(Number(f.weight || 0) / total * 100);
+        return `<div class="factor-row"><b>${escapeHtml(f.name)}</b><div class="bar"><span style="width:${pctValue}%"></span></div><span>${pctValue}%</span></div>`;
+      }).join('') || '<div class="empty">暂无因子。</div>';
+    }
+
+    function fillFactor(index) {
+      const f = currentFactors[index];
+      if (!f) return;
+      $('factorId').value = f.id;
+      $('factorName').value = f.name;
+      $('factorDescription').value = f.description || '';
+      $('factorWeight').value = f.weight;
+      $('factorSortOrder').value = f.sortOrder;
+      $('factorEnabled').value = f.enabled ? 'true' : 'false';
+    }
+
+    async function saveFactor() {
+      const body = {
+        id: $('factorId').value,
+        name: $('factorName').value,
+        description: $('factorDescription').value,
+        weight: Number($('factorWeight').value || 0),
+        sortOrder: Number($('factorSortOrder').value || 100),
+        enabled: $('factorEnabled').value === 'true'
+      };
+      const res = await fetch('/api/recommendation-factors', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      toast(data.success ? '推荐因子已保存' : data.message, data.success ? 'success' : 'error');
+      if (data.success) await Promise.all([loadFactors(), loadRecommendations()]);
+    }
+
+    async function loadStockFactorValues() {
+      const symbol = $('factorSymbol').value.trim().toUpperCase();
+      if (!symbol) return toast('请先填写股票代码', 'error');
+      const res = await fetch(`/api/stock-factor-values/${encodeURIComponent(symbol)}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) return $('stockFactorValueList').innerHTML = `<div class="empty">${escapeHtml(data.message)}</div>`;
+      currentStockFactorValues = data.values || [];
+      $('stockFactorValueList').innerHTML = currentStockFactorValues.length ? `<table class="table"><thead><tr><th>因子</th><th>评分</th><th>说明</th><th></th></tr></thead><tbody>${currentStockFactorValues.map((v, i) => `
+        <tr><td>${escapeHtml(factorName(v.factorId))}<br><small>${escapeHtml(v.factorId)}</small></td><td><b>${v.score}</b><br><small>${escapeHtml(v.label)}</small></td><td>${escapeHtml(v.summary)}</td><td><button class="btn secondary small" onclick="fillStockFactorValue(${i})">编辑</button></td></tr>
+      `).join('')}</tbody></table>` : '<div class="empty">该股票还没有自定义因子评分。</div>';
+    }
+
+    function factorName(id) {
+      return (currentFactors.find(f => f.id === id) || {}).name || id;
+    }
+
+    function fillStockFactorValue(index) {
+      const v = currentStockFactorValues[index];
+      if (!v) return;
+      $('factorSymbol').value = v.symbol;
+      $('stockFactorId').value = v.factorId;
+      $('stockFactorScore').value = v.score;
+      $('stockFactorLabel').value = v.label || '';
+      $('stockFactorSummary').value = v.summary || '';
+    }
+
+    async function saveStockFactorValue() {
+      const body = {
+        symbol: $('factorSymbol').value,
+        factorId: $('stockFactorId').value,
+        score: Number($('stockFactorScore').value || 60),
+        label: $('stockFactorLabel').value,
+        summary: $('stockFactorSummary').value
+      };
+      const res = await fetch('/api/stock-factor-values', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      toast(data.success ? '个股因子评分已保存' : data.message, data.success ? 'success' : 'error');
+      if (data.success) await Promise.all([loadStockFactorValues(), loadRecommendations()]);
+    }
+
+    async function loadHistory() {
+      const res = await fetch('/api/recommendations/history', { headers: authHeaders() });
+      const data = await res.json();
+      if (!data.success) return $('historyTable').innerHTML = `<div class="empty">${escapeHtml(data.message)}</div>`;
+      currentHistoryItems = data.history || [];
+      const runIds = new Set(currentHistoryItems.map(item => item.runId));
+      $('runCountStat').textContent = runIds.size;
+      $('historyTable').innerHTML = renderHistoryTable(currentHistoryItems);
+      $('dashboardHistoryTable').innerHTML = renderCompactHistory(currentHistoryItems.slice(0, 6));
+    }
+
+    function renderCompactHistory(items) {
+      if (!items.length) return '<div class="empty">暂无推荐历史。</div>';
+      return `<table class="table"><thead><tr><th>日期</th><th>股票</th><th>周期</th><th>结果</th><th>收益</th></tr></thead><tbody>${items.map(item => `
+        <tr><td>${dateTime(item.generatedAt).slice(0, 10)}</td><td>${escapeHtml(item.name)} <small>${escapeHtml(item.symbol)}</small></td><td>${horizonLabel(item.horizon)}</td><td>${reviewPill(item.reviewOutcome)}</td><td class="${Number(item.actualReturn || 0) < 0 ? 'loss' : 'gain'}">${item.actualReturn ?? '--'}${item.actualReturn === undefined ? '' : '%'}</td></tr>
+      `).join('')}</tbody></table>`;
+    }
+
+    function renderHistoryTable(items, compact = false) {
+      if (!items.length) return '<div class="empty">还没有推荐历史。点击“生成并保存”先创建快照。</div>';
+      if (compact) return renderCompactHistory(items);
+      return `<table class="table"><thead><tr><th>时间</th><th>阶段</th><th>股票</th><th>评分</th><th>因子快照</th><th>复盘</th></tr></thead><tbody>${items.map((item, i) => `
+        <tr><td>${dateTime(item.generatedAt)}<br><small>${escapeHtml(item.source)}</small></td><td><span class="status-pill blue">${horizonLabel(item.horizon)}</span></td><td><b>${escapeHtml(item.symbol)}</b><br><small>${escapeHtml(item.name)}</small></td><td><b>${item.score}</b><br><span class="status-pill ${actionClass(item.action)}">${actionText[item.action] || item.action}</span></td><td>${renderHistoryFactors(item.factorContributions || [])}</td><td><div class="review-box"><div class="review-row"><select id="reviewOutcome${i}"><option value="pending" ${item.reviewOutcome === 'pending' || !item.reviewOutcome ? 'selected' : ''}>待复盘</option><option value="accurate" ${item.reviewOutcome === 'accurate' ? 'selected' : ''}>准确</option><option value="mixed" ${item.reviewOutcome === 'mixed' ? 'selected' : ''}>部分准确</option><option value="inaccurate" ${item.reviewOutcome === 'inaccurate' ? 'selected' : ''}>不准确</option></select><input id="reviewReturn${i}" type="number" step="0.01" placeholder="实际收益%" value="${item.actualReturn ?? ''}" /><button class="btn secondary small" onclick="saveReview(${i})">保存</button></div><textarea id="reviewReason${i}" placeholder="为什么准确或不准确">${escapeHtml(item.reviewReason || '')}</textarea></div></td></tr>
+      `).join('')}</tbody></table>`;
+    }
+
+    function renderHistoryFactors(items) {
+      if (!items.length) return '<small>旧记录无因子快照</small>';
+      return `<div class="factor-chips">${items.slice(0, 6).map(f => `<div class="factor-chip"><b>${escapeHtml(f.name)} ${f.score}</b><span>权重 ${Number(f.weight).toFixed(2)} · 贡献 ${Number(f.contribution).toFixed(1)}</span></div>`).join('')}</div>`;
+    }
+
+    function renderFactorContributions(items) {
+      if (!items.length) return '';
+      return `<table class="table" style="margin-top:12px;"><thead><tr><th>因子</th><th>权重</th><th>评分</th><th>贡献</th></tr></thead><tbody>${items.map(item => `
+        <tr><td><b>${escapeHtml(item.name)}</b><br><small>${escapeHtml(item.label || '')}</small></td><td>${Number(item.weight).toFixed(2)}</td><td>${item.score}</td><td>${Number(item.contribution).toFixed(1)}</td></tr>
+      `).join('')}</tbody></table>`;
+    }
+
+    function horizonLabel(horizon) {
+      return ({ monthly: '月度', quarterly: '季度', yearly: '年度' })[horizon] || horizon;
+    }
+
+    function actionClass(action) {
+      return action === 'buy' ? 'green' : action === 'watch' ? 'orange' : 'red';
+    }
+
+    function reviewPill(outcome) {
+      const map = {
+        accurate: ['green', '准确'],
+        inaccurate: ['red', '不准确'],
+        mixed: ['orange', '部分准确'],
+        pending: ['blue', '待复盘']
+      };
+      const item = map[outcome || 'pending'] || map.pending;
+      return `<span class="status-pill ${item[0]}">${item[1]}</span>`;
+    }
+
+    async function saveReview(index) {
+      const item = currentHistoryItems[index];
+      if (!item) return;
+      const actualReturnInput = $(`reviewReturn${index}`).value;
+      const body = {
+        runId: item.runId,
+        symbol: item.symbol,
+        horizon: item.horizon,
+        outcome: $(`reviewOutcome${index}`).value,
+        actualReturn: actualReturnInput === '' ? undefined : Number(actualReturnInput),
+        reason: $(`reviewReason${index}`).value
+      };
+      const res = await fetch('/api/recommendation-reviews', { method: 'POST', headers: authHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      toast(data.success ? '复盘已保存' : data.message, data.success ? 'success' : 'error');
+      if (data.success) await loadHistory();
     }
 
     async function testTelegram() {
-      const cfg = { botToken: document.getElementById('telegramBotToken').value, chatId: document.getElementById('telegramChatId').value, proxyHost: document.getElementById('telegramProxyHost').value, proxyPort: document.getElementById('telegramProxyPort').value };
-      if (!cfg.botToken || !cfg.chatId) { showNotification('请填写 Token 和 Chat ID', 'error'); return; }
-      try { const r = await fetch('/api/test/telegram', { method:'POST', headers: authHeaders(), body: JSON.stringify(cfg) }); const d = await r.json(); showNotification(d.message, d.success?'success':'error'); } catch(e) { showNotification(e.message,'error'); }
-    }
-
-    document.addEventListener('click', e => { if (!e.target.closest('.search-container')) document.getElementById('searchResults')?.classList.remove('show'); });
-
-    // Check for Stripe redirect
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('status') === 'success') {
-      showNotification('🎉 升级成功！已切换为 Pro 版');
-      window.history.replaceState({}, '', '/');
+      const botToken = $('telegramBotToken').value;
+      const chatId = $('telegramChatId').value;
+      if (!botToken || !chatId) return toast('测试需要填写 Bot Token 和 Chat ID', 'error');
+      const res = await fetch('/api/test/telegram', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ botToken, chatId, proxyHost: $('telegramProxyHost').value, proxyPort: $('telegramProxyPort').value }) });
+      const data = await res.json();
+      toast(data.message || '测试完成', data.success ? 'success' : 'error');
     }
 
     checkAuth();

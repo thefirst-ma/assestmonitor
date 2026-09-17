@@ -1,11 +1,11 @@
 import dotenv from 'dotenv';
-import { MonitorConfig } from '../types';
+import { MonitorConfig, RecommendationConfig } from '../types';
 
 dotenv.config();
 
 export const proxyConfig = {
-  host: process.env.API_PROXY_HOST || process.env.TELEGRAM_PROXY_HOST || '',
-  port: parseInt(process.env.API_PROXY_PORT || process.env.TELEGRAM_PROXY_PORT || '0'),
+  host: process.env.API_PROXY_HOST || '',
+  port: parseInt(process.env.API_PROXY_PORT || '0'),
   get enabled() { return !!this.host && this.port > 0; }
 };
 
@@ -37,6 +37,46 @@ export const config: MonitorConfig = {
 };
 
 export const DATABASE_PATH = process.env.DATABASE_PATH || './data/crypto.db';
+
+export const databaseConfig = {
+  driver: (process.env.DATABASE_DRIVER || 'sqljs').toLowerCase(),
+  sqlJsPath: process.env.DATABASE_PATH || './data/crypto.db',
+  mysql: {
+    host: process.env.MYSQL_HOST || '127.0.0.1',
+    port: parseInt(process.env.MYSQL_PORT || '3306', 10),
+    database: process.env.MYSQL_DATABASE || 'investment_monitor',
+    user: process.env.MYSQL_USER || 'root',
+    password: process.env.MYSQL_PASSWORD || '',
+    connectionLimit: parseInt(process.env.MYSQL_CONNECTION_LIMIT || '10', 10)
+  }
+};
+
+function parseStockPool(value?: string): string[] {
+  const fallback = [
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AVGO', 'COST', 'JPM',
+    'V', 'MA', 'UNH', 'LLY', 'JNJ', 'PG', 'HD', 'KO', 'PEP', 'WMT',
+    '600519.SS', '000858.SZ', '601318.SS', '600036.SS', '000333.SZ', '300750.SZ',
+    '0700.HK', '9988.HK', '3690.HK', '1211.HK'
+  ];
+
+  const symbols = (value || '')
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(Boolean);
+
+  return symbols.length > 0 ? Array.from(new Set(symbols)) : fallback;
+}
+
+export const recommendationConfig: RecommendationConfig = {
+  enabled: process.env.RECOMMENDATION_ENABLED === 'true',
+  hour: parseInt(process.env.RECOMMENDATION_HOUR || '8', 10),
+  minute: parseInt(process.env.RECOMMENDATION_MINUTE || '30', 10),
+  timezone: process.env.RECOMMENDATION_TIMEZONE || 'Asia/Shanghai',
+  limit: parseInt(process.env.RECOMMENDATION_LIMIT || '5', 10),
+  minScore: parseFloat(process.env.RECOMMENDATION_MIN_SCORE || '55'),
+  stockPool: parseStockPool(process.env.RECOMMENDATION_STOCK_POOL),
+  runOnStart: process.env.RECOMMENDATION_RUN_ON_START === 'true'
+};
 
 /** 涨跌幅计算回看窗口（秒）：与窗口内最高价/最低价比较，避免「分多步下跌每步都小于阈值」导致漏报 */
 export const PRICE_ALERT_LOOKBACK_SECONDS = parseInt(process.env.PRICE_ALERT_LOOKBACK_SECONDS || '3600', 10);
