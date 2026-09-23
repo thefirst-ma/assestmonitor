@@ -23,6 +23,10 @@ import {
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { UserNotification } from '../services/user-notifications';
+
+const notificationQueries: Record<string, string> = JSON.parse(fs.readFileSync(path.join(__dirname, '../../sql/notification_queries.json'), 'utf8'));
+const researchQueries: Record<string, string> = JSON.parse(fs.readFileSync(path.join(__dirname, '../../sql/research_queries.json'), 'utf8'));
 
 type SqlParam = string | number | null | undefined;
 
@@ -49,6 +53,7 @@ class SqlJsBackend implements DatabaseBackend {
       : new SQL.Database();
 
     await this.createSchema();
+    this.database.run(fs.readFileSync(path.join(__dirname, '../../sql/004_user_notifications_sqljs.sql'), 'utf8'));
     await this.seedDefaultRecommendationFactors();
     this.save();
   }
@@ -210,6 +215,8 @@ class MySqlBackend implements DatabaseBackend {
       password: databaseConfig.mysql.password,
       waitForConnections: true,
       connectionLimit: databaseConfig.mysql.connectionLimit,
+      connectTimeout: 12000,
+      ssl: databaseConfig.mysql.sslCa ? { ca: databaseConfig.mysql.sslCa, rejectUnauthorized: true } : undefined,
       namedPlaceholders: false,
       decimalNumbers: true
     });
@@ -250,7 +257,8 @@ class MySqlBackend implements DatabaseBackend {
       'stock_factor_values',
       'recommendation_runs',
       'recommendation_items',
-      'recommendation_reviews'
+      'recommendation_reviews',
+      'user_notifications'
     ];
     const placeholders = required.map(() => '?').join(',');
     const rows = await this.rows<{ table_name: string }>(
@@ -260,7 +268,7 @@ class MySqlBackend implements DatabaseBackend {
     const found = new Set(rows.map(row => row.table_name));
     const missing = required.filter(table => !found.has(table));
     if (missing.length > 0) {
-      throw new Error(`MySQL 缺少必要表: ${missing.join(', ')}。请先执行 sql/001_core_recommendation_mysql.sql、sql/002_market_data_sources_mysql.sql、sql/003_app_runtime_mysql.sql`);
+      throw new Error(`MySQL 缺少必要表: ${missing.join(', ')}。请先执行 sql/ 下 001 至 004 的 *_mysql.sql 文件`);
     }
   }
 }
@@ -276,6 +284,30 @@ function defaultRecommendationFactors(): RecommendationFactor[] {
 }
 
 export class AssetDatabase {
+  async getUserNotifications(userId: string): Promise<UserNotification[]> {
+    await this.init();
+    const rows = await this.queryRows<any>(notificationQueries.list, [userId]);
+    return rows.map(row => ({
+      userId: this.getValue(row, 'user_id', 0), channel: this.getValue(row, 'channel', 1),
+      enabled: !!this.getValue(row, 'enabled', 2), secret: this.getValue(row, 'secret', 3),
+      destination: this.getValue(row, 'destination', 4), priceAlerts: !!this.getValue(row, 'price_alerts', 5),
+      dailyReport: !!this.getValue(row, 'daily_report', 6)
+    }));
+  }
+
+  async saveUserNotification(setting: UserNotification): Promise<void> {
+    await this.init();
+    await this.backend.run(notificationQueries[this.isMysql ? 'mysqlSave' : 'sqljsSave'], [
+      setting.userId, setting.channel, Number(setting.enabled), setting.secret, setting.destination,
+      Number(setting.priceAlerts), Number(setting.dailyReport), Math.floor(Date.now() / 1000)
+    ]);
+  }
+
+  async getNotificationSubscribers(): Promise<string[]> {
+    await this.init();
+    return (await this.queryRows<any>(notificationQueries.subscribers)).map(row => this.getValue(row, 'user_id', 0));
+  }
+
   private backend: DatabaseBackend = databaseConfig.driver === 'mysql' ? new MySqlBackend() : new SqlJsBackend();
   private initialized = false;
 
@@ -650,6 +682,23 @@ export class AssetDatabase {
       LIMIT ?
     `, [limit]);
     return rows.map(row => this.rowToRecommendationHistoryItem(row));
+  }
+
+  async getLatestRecommendationSnapshot(): Promise<{ run: RecommendationRun | null; recommendations: StagedRecommendations }> {
+    await this.init();
+    const rows = await this.queryRows<any>(researchQueries.latestSnapshot);
+    const recommendations: StagedRecommendations = { monthly: [], quarterly: [], yearly: [] };
+    if (!rows.length) return { run: null, recommendations };
+    const first = rows[0];
+    const run = { id: String(this.getValue(first, 'run_id', 0)), generatedAt: Number(this.getValue(first, 'generated_at', 1)), source: String(this.getValue(first, 'source', 2)) };
+    for (const row of rows) {
+      const horizon = this.getValue(row, 'horizon', 3) as RecommendationHorizon;
+      const raw = this.getValue(row, 'payload_json', 4);
+      if (!['monthly', 'quarterly', 'yearly'].includes(horizon) || raw == null) continue;
+      const item = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      recommendations[horizon].push({ ...item, horizon });
+    }
+    return { run, recommendations };
   }
 
   async getRecommendationHistoryBySymbol(symbol: string, limit = 30): Promise<RecommendationHistoryItem[]> {

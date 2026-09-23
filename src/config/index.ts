@@ -47,7 +47,8 @@ export const databaseConfig = {
     database: process.env.MYSQL_DATABASE || 'investment_monitor',
     user: process.env.MYSQL_USER || 'root',
     password: process.env.MYSQL_PASSWORD || '',
-    connectionLimit: parseInt(process.env.MYSQL_CONNECTION_LIMIT || '10', 10)
+    connectionLimit: parseInt(process.env.MYSQL_CONNECTION_LIMIT || '10', 10),
+    sslCa: process.env.MYSQL_SSL_CA_BASE64 ? Buffer.from(process.env.MYSQL_SSL_CA_BASE64, 'base64').toString('utf8') : undefined
   }
 };
 

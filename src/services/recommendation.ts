@@ -2,6 +2,7 @@ import axios, { AxiosRequestConfig } from 'axios';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { NotificationService } from './notifier';
+import { notifyReportSubscribers } from './user-notifications';
 import { config, proxyConfig, recommendationConfig } from '../config';
 import { database } from '../database';
 import {
@@ -346,6 +347,7 @@ export class RecommendationService {
     const notifier = new NotificationService(config.notifications);
     const message = this.formatTelegramReport(recommendations);
     await notifier.sendTelegramMessage(message, 'long-term stock recommendations');
+    await notifyReportSubscribers(message);
   }
 
   formatTelegramReport(recommendations: StagedRecommendations | StockRecommendation[]): string {

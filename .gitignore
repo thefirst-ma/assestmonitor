@@ -6,3 +6,5 @@ data/
 .DS_Store
 
 .vercel
+.env*
+sql/.private/

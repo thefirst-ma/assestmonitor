@@ -3,7 +3,8 @@
   "buildCommand": "npm run build",
   "functions": {
     "api/index.js": {
-      "includeFiles": "{dist/**,public/**}"
+      "includeFiles": "{dist/**,public/**,sql/notification_queries.json,sql/research_queries.json,sql/004_user_notifications_sqljs.sql}",
+      "maxDuration": 300
     }
   },
   "redirects": [
@@ -11,6 +12,12 @@
       "source": "/",
       "destination": "/index.html",
       "permanent": false
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/recommendations",
+      "schedule": "30 0 * * *"
     }
   ],
   "rewrites": [

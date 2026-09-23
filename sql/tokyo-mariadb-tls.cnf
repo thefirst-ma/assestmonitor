@@ -1,0 +1,4 @@
+[mariadb]
+ssl_cert = /etc/mysql/ssl/investment-monitor/server.pem
+ssl_key = /etc/mysql/ssl/investment-monitor/server-key.pem
+ssl_ca = /etc/mysql/ssl/investment-monitor/server.pem

@@ -1,0 +1,6 @@
+{
+  "list": "SELECT user_id, channel, enabled, secret, destination, price_alerts, daily_report FROM user_notifications WHERE user_id = ?",
+  "subscribers": "SELECT DISTINCT user_id FROM user_notifications WHERE enabled = 1 AND daily_report = 1",
+  "mysqlSave": "INSERT INTO user_notifications (user_id, channel, enabled, secret, destination, price_alerts, daily_report, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), secret = VALUES(secret), destination = VALUES(destination), price_alerts = VALUES(price_alerts), daily_report = VALUES(daily_report), updated_at = VALUES(updated_at)",
+  "sqljsSave": "INSERT INTO user_notifications (user_id, channel, enabled, secret, destination, price_alerts, daily_report, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, channel) DO UPDATE SET enabled = excluded.enabled, secret = excluded.secret, destination = excluded.destination, price_alerts = excluded.price_alerts, daily_report = excluded.daily_report, updated_at = excluded.updated_at"
+}

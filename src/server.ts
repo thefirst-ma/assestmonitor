@@ -9,6 +9,7 @@ import { stripeService } from './services/stripe';
 import { stockAnalysisService } from './services/stock-analysis';
 import { recommendationService } from './services/recommendation';
 import { recommendationScheduler } from './recommendationScheduler';
+import { encryptToken, sendPush, validateChannel } from './services/user-notifications';
 import {
   AssetType,
   PLAN_LIMITS,
@@ -24,6 +25,7 @@ import {
 import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -78,6 +80,42 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): vo
 
 // ---- Public routes ----
 
+app.get('/api/cron/recommendations', async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  const expected = secret ? Buffer.from(`Bearer ${secret}`) : Buffer.alloc(0);
+  const received = Buffer.from(req.headers.authorization || '');
+  if (!secret || received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
+    res.status(401).json({ success: false, message: 'Unauthorized' });
+    return;
+  }
+  if (!recommendationConfig.enabled) {
+    res.status(503).json({ success: false, message: 'Recommendation schedule is disabled' });
+    return;
+  }
+
+  try {
+    const { runId, recommendations } = await recommendationService.generateAndSaveRecommendations('vercel-cron');
+    await recommendationService.sendTelegramReport(recommendations);
+    res.json({ success: true, runId });
+  } catch (error: any) {
+    console.error('Daily recommendation cron failed:', error);
+    res.status(500).json({ success: false, message: 'Daily recommendation generation failed' });
+  }
+});
+
+const authAttempts = new Map<string, { count: number; until: number }>();
+app.use('/api/auth', (req: Request, res: Response, next: NextFunction) => {
+  if (req.method !== 'POST') return next();
+  const now = Date.now();
+  for (const [ip, entry] of authAttempts) if (entry.until <= now) authAttempts.delete(ip);
+  const ip = req.ip || 'unknown';
+  const entry = authAttempts.get(ip) || { count: 0, until: now + 15 * 60 * 1000 };
+  entry.count++;
+  authAttempts.set(ip, entry);
+  if (entry.count > 30) { res.status(429).json({ success: false, message: '尝试过于频繁，请 15 分钟后重试' }); return; }
+  next();
+});
+
 app.post('/api/auth/register', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -107,6 +145,51 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
 });
 
 // ---- Protected routes ----
+
+app.get('/api/notifications', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const rows = await database.getUserNotifications(req.userId!);
+    res.json(rows.map(({ secret, userId, ...setting }) => ({ ...setting, configured: !!secret })));
+  } catch {
+    res.status(500).json({ success: false, message: '读取通知配置失败，请确认已执行 sql/004_user_notifications_mysql.sql' });
+  }
+});
+
+app.put('/api/notifications/:channel', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const channel = validateChannel(req.params.channel);
+    const { enabled, token, destination, priceAlerts, dailyReport } = req.body;
+    if ([enabled, priceAlerts, dailyReport].some(value => typeof value !== 'boolean')) throw new Error('通知开关必须为布尔值');
+    if (typeof token !== 'string' || typeof destination !== 'string' || !/^[\w-]{0,100}$/.test(destination)) throw new Error('通知参数格式不正确');
+    if (token && !/^[a-zA-Z0-9_-]{16,200}$/.test(token)) throw new Error('PushPlus Token 格式不正确');
+    const existing = (await database.getUserNotifications(req.userId!)).find(row => row.channel === channel);
+    const secret = token ? encryptToken(token) : existing?.secret || '';
+    if (enabled && !secret) throw new Error('启用前请填写 PushPlus Token');
+    await database.saveUserNotification({ userId: req.userId!, channel, enabled, secret,
+      destination: channel === 'qq' ? destination : '', priceAlerts, dailyReport });
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.code ? '保存失败，请检查数据库迁移' : error.message });
+  }
+});
+
+const notificationTests = new Map<string, number>();
+app.post('/api/notifications/:channel/test', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    const channel = validateChannel(req.params.channel);
+    const key = `${req.userId}:${channel}`;
+    const now = Date.now();
+    for (const [id, expiry] of notificationTests) if (expiry <= now) notificationTests.delete(id);
+    if (notificationTests.has(key)) { res.status(429).json({ success: false, message: '请间隔一分钟再测试' }); return; }
+    const setting = (await database.getUserNotifications(req.userId!)).find(row => row.channel === channel);
+    if (!setting?.secret) throw new Error('请先保存此渠道的配置');
+    notificationTests.set(key, now + 60000);
+    const receipt = await sendPush(setting, '投研系统通知测试', '通知连接测试。收到此消息后，即可订阅价格提醒和长期推荐日报。');
+    res.json({ success: true, receipt, message: '推送平台已受理，请在微信或 QQ 确认收信' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.code ? '测试失败，请检查通知配置' : error.message });
+  }
+});
 
 app.get('/api/auth/me', authMiddleware, async (req: AuthRequest, res: Response) => {
   const user = await database.getUserById(req.userId!);
@@ -237,6 +320,14 @@ app.get('/api/recommendations/staged', authMiddleware, async (req: AuthRequest, 
     res.json({ success: true, recommendations });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+app.get('/api/recommendations/latest', authMiddleware, async (req: AuthRequest, res: Response) => {
+  try {
+    res.json({ success: true, ...await database.getLatestRecommendationSnapshot() });
+  } catch {
+    res.status(500).json({ success: false, message: '读取推荐快照失败，请稍后重试' });
   }
 });
 

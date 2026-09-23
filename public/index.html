@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>长期股票投研推荐系统</title>
+  <link rel="stylesheet" href="/research-workbench.css" />
+  <script src="/research-tools.js"></script>
   <style>
     :root {
       --bg: #f5f7fb;
@@ -90,6 +92,11 @@
 
     .field { display: grid; gap: 7px; margin-bottom: 13px; }
     .field label { font-size: 13px; color: #344054; font-weight: 800; }
+    #personalNotifications input[type="checkbox"] { width: 16px; height: 16px; padding: 0; vertical-align: middle; accent-color: var(--blue); }
+    #personalNotifications > div { min-width: 0; padding: 12px 0; }
+    #personalNotifications .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    #personalNotificationStatus { color: var(--muted); overflow-wrap: anywhere; }
+    button:disabled { cursor: wait; opacity: .6; }
     input, select, textarea {
       width: 100%;
       border: 1px solid var(--line-strong);
@@ -252,6 +259,9 @@
       gap: 14px;
       min-width: 0;
     }
+    .top-actions > .btn, .top-actions > .notification-chip, .top-actions > .avatar { flex-shrink: 0; }
+    .user-chip { min-width: 0; overflow: hidden; }
+    #userEmail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .date-chip, .notification-chip, .user-chip {
       min-height: 38px;
       display: inline-flex;
@@ -602,6 +612,12 @@
       .kpis, .recommend-lanes, .bottom-grid, .right-stack, .grid2, .grid3, .form-row { grid-template-columns: 1fr; }
       .factor-snapshot { grid-template-columns: 1fr; }
       .big-score { border-left: 0; border-top: 1px solid var(--line); padding: 12px 0 0; }
+      .sidebar-note { display: none; }
+      .nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+      .nav button { padding: 10px 6px; font-size: 12px; gap: 5px; justify-content: center; }
+      .user-chip { max-width: calc(100% - 65px); }
+      .topbar { position: static; }
+      .page { padding: 14px; }
     }
   </style>
 </head>
@@ -624,16 +640,17 @@
         <button id="loginTab" class="active" onclick="switchAuth('login')">登录</button>
         <button id="registerTab" onclick="switchAuth('register')">注册</button>
       </div>
-      <div id="loginForm">
+      <form id="loginForm" onsubmit="event.preventDefault(); login()">
         <div class="field"><label>邮箱</label><input id="loginEmail" type="email" autocomplete="email" /></div>
         <div class="field"><label>密码</label><input id="loginPassword" type="password" autocomplete="current-password" /></div>
-        <button class="btn" style="width:100%;" onclick="login()">登录系统</button>
-      </div>
-      <div id="registerForm" style="display:none;">
-        <div class="field"><label>邮箱</label><input id="regEmail" type="email" autocomplete="email" /></div>
-        <div class="field"><label>密码</label><input id="regPassword" type="password" autocomplete="new-password" /></div>
-        <button class="btn" style="width:100%;" onclick="register()">创建账户</button>
-      </div>
+        <button id="loginSubmit" type="submit" class="btn" style="width:100%;">登录系统</button>
+      </form>
+      <form id="registerForm" style="display:none;" onsubmit="event.preventDefault(); register()">
+        <div class="field"><label for="regEmail">邮箱</label><input id="regEmail" type="email" maxlength="254" required autocomplete="email" /></div>
+        <div class="field"><label for="regPassword">密码</label><input id="regPassword" type="password" minlength="8" maxlength="72" required autocomplete="new-password" placeholder="至少 8 位" /></div>
+        <div class="field"><label for="regConfirm">确认密码</label><input id="regConfirm" type="password" required autocomplete="new-password" /></div>
+        <button id="registerSubmit" type="submit" class="btn" style="width:100%;">创建账户</button>
+      </form>
     </div>
   </div>
 
@@ -705,7 +722,7 @@
 
               <div class="panel">
                 <div class="panel-head">
-                  <div><h2>今日长期推荐</h2><p>月度看趋势，季度看景气，年度看护城河与负责人。</p></div>
+                  <div><h2>最新长期推荐</h2><p id="dashboardSnapshotDate">等待推荐快照</p></div>
                   <button class="link-btn" onclick="switchSectionById('recommendations')">查看全部推荐明细 →</button>
                 </div>
                 <div id="dashboardRecommendations" class="recommend-lanes"></div>
@@ -812,8 +829,18 @@
 
         <section id="recommendations" class="section">
           <div class="panel">
-            <div class="panel-head"><div><h2>股票推荐</h2><p>按月、季度、年度输出长期推荐，并展示推荐依据。</p></div><div><button class="btn secondary" onclick="loadRecommendations()">刷新</button> <button class="btn" onclick="generateSavedRun()">生成并保存</button></div></div>
-            <div id="recommendationGrid" class="recommend-lanes"></div>
+            <div class="panel-head"><div><h2>长期推荐研究台</h2><p id="researchLoadedAt">等待推荐数据</p></div><div><button class="btn secondary" onclick="loadRecommendations()">刷新</button> <button id="generateRunButton" class="btn" onclick="generateSavedRun()">生成并保存</button></div></div>
+            <div class="research-toolbar">
+              <div class="field"><label for="researchQuery">股票</label><input id="researchQuery" type="search" placeholder="代码或名称" oninput="renderResearchWorkbench()"></div>
+              <div class="field"><label for="researchHorizon">推荐周期</label><select id="researchHorizon" onchange="renderResearchWorkbench()"><option value="">全部周期</option><option value="monthly">月度</option><option value="quarterly">季度</option><option value="yearly">年度</option></select></div>
+              <div class="field"><label for="researchAction">推荐建议</label><select id="researchAction" onchange="renderResearchWorkbench()"><option value="">全部建议</option><option value="buy">推荐关注</option><option value="watch">观察</option><option value="avoid">回避</option></select></div>
+              <div class="field"><label for="researchRisk">风险核验</label><select id="researchRisk" onchange="renderResearchWorkbench()"><option value="">全部状态</option><option value="high">重点核验</option><option value="medium">常规核验</option><option value="low">较低波动</option><option value="unknown">数据不足</option></select></div>
+              <div class="field"><label for="researchMinScore">最低推荐分</label><input id="researchMinScore" type="number" min="0" max="100" value="0" oninput="renderResearchWorkbench()"></div>
+              <div class="field"><label for="researchSort">排序</label><select id="researchSort" onchange="renderResearchWorkbench()"><option value="score">推荐分降序</option><option value="volatility">波动率升序</option><option value="symbol">股票代码</option></select></div>
+            </div>
+            <div class="research-status"><span id="researchCount" role="status"></span><div class="actions"><button class="btn secondary small" onclick="saveResearchFilter()">保存筛选</button><button class="btn secondary small" onclick="resetResearchFilter()">重置筛选</button><button id="researchCompare" class="btn small" onclick="openResearchComparison()" disabled>对比 (0/3)</button></div></div>
+            <div id="recommendationGrid" class="research-scroll"></div>
+            <details class="research-note"><summary>风险核验口径</summary>重点核验：年化波动率 ≥ 55% 或区间回撤 ≥ 30%；常规核验：波动率 ≥ 30% 或回撤 ≥ 15%；低于上述阈值仅表示历史波动较低。缺少指标时标记数据不足。推荐分是模型评分，不代表盈利概率。</details>
           </div>
           <div class="panel">
             <div class="panel-head"><h3>单股分析报告</h3></div>
@@ -861,11 +888,24 @@
         <section id="history" class="section">
           <div class="panel">
             <div class="panel-head"><div><h2>推荐复盘</h2><p>回看每次推荐，记录准确性、实际收益和原因。</p></div><button class="btn secondary" onclick="loadHistory()">刷新历史</button></div>
+            <div class="research-toolbar research-history-filters">
+              <div class="field"><label for="historyQuery">股票</label><input id="historyQuery" type="search" placeholder="代码或名称" oninput="renderReviewWorkbench()"></div>
+              <div class="field"><label for="historyHorizon">周期</label><select id="historyHorizon" onchange="renderReviewWorkbench()"><option value="">全部周期</option><option value="monthly">月度</option><option value="quarterly">季度</option><option value="yearly">年度</option></select></div>
+              <div class="field"><label for="historyOutcome">复盘结论</label><select id="historyOutcome" onchange="renderReviewWorkbench()"><option value="">全部结论</option><option value="pending">待复盘</option><option value="accurate">准确</option><option value="mixed">部分准确</option><option value="inaccurate">不准确</option></select></div>
+              <div class="field"><label for="reviewCostBps">额外成本情景 (基点)</label><input id="reviewCostBps" type="number" min="0" max="1000" step="1" value="0" oninput="renderReviewAnalytics()"></div>
+            </div>
+            <div id="reviewAnalytics"></div>
+            <div class="research-status"><span id="reviewSampleScope"></span><button class="btn secondary small" onclick="exportReviewCsv()">导出筛选结果 CSV</button></div>
             <div id="historyTable"></div>
           </div>
         </section>
 
         <section id="notifications" class="section">
+          <div class="panel">
+            <div class="panel-head"><h2>我的微信与 QQ 通知</h2><a class="link-btn" href="https://www.pushplus.plus/" target="_blank" rel="noopener noreferrer">PushPlus 账户</a></div>
+            <div id="personalNotificationStatus" role="status" aria-live="polite"></div>
+            <div id="personalNotifications" class="grid2"></div>
+          </div>
           <div class="grid2">
             <div class="panel">
               <div class="panel-head"><h2>Telegram 通知</h2></div>
@@ -882,8 +922,8 @@
               <div class="panel-head"><h2>通知状态</h2></div>
               <table class="table">
                 <tbody>
-                  <tr><td>价格提醒</td><td><span class="status-pill green">已开启</span></td><td>实时监控阈值</td></tr>
-                  <tr><td>长期推荐日报</td><td><span class="status-pill blue">按日生成</span></td><td>月度/季度/年度</td></tr>
+                  <tr><td>价格提醒</td><td>按渠道订阅</td><td>实时监控阈值</td></tr>
+                  <tr><td>长期推荐日报</td><td id="dailyScheduleState">读取中</td><td>月度/季度/年度</td></tr>
                   <tr><td>Webhook</td><td><span class="status-pill orange">可选</span></td><td>钉钉/企微/自定义</td></tr>
                 </tbody>
               </table>
@@ -929,6 +969,11 @@
     </div>
   </div>
 
+  <dialog id="researchDialog" class="research-dialog" aria-labelledby="researchDialogTitle">
+    <div class="panel-head"><h2 id="researchDialogTitle">推荐对比</h2><button class="research-close" title="关闭" aria-label="关闭对比" onclick="$('researchDialog').close()">×</button></div>
+    <div id="researchDialogBody"></div>
+  </dialog>
+  <script src="/research-workbench.js"></script>
   <script>
     const horizonMeta = {
       monthly: { title: '月度推荐 · 趋势与短期风险', short: '月度', color: 'blue' },
@@ -970,29 +1015,89 @@
     }
 
     async function login() {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: $('loginEmail').value, password: $('loginPassword').value })
-      });
-      const data = await res.json();
-      if (!data.success) return toast(data.message || '登录失败', 'error');
-      token = data.token;
-      localStorage.setItem('token', token);
-      await checkAuth();
+      await submitAuth('login', $('loginEmail').value, $('loginPassword').value);
     }
 
     async function register() {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: $('regEmail').value, password: $('regPassword').value })
-      });
-      const data = await res.json();
-      if (!data.success) return toast(data.message || '注册失败', 'error');
-      token = data.token;
-      localStorage.setItem('token', token);
-      await checkAuth();
+      if (!$('registerForm').reportValidity()) return;
+      if ($('regPassword').value !== $('regConfirm').value) return toast('两次输入的密码不一致', 'error');
+      await submitAuth('register', $('regEmail').value, $('regPassword').value);
+    }
+
+    async function submitAuth(mode, email, password) {
+      const button = $(mode + 'Submit');
+      if (button.disabled) return;
+      button.disabled = true;
+      const label = button.textContent;
+      button.textContent = '正在提交…';
+      try {
+        const res = await fetch('/api/auth/' + mode, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.message || '提交失败');
+        token = data.token;
+        localStorage.setItem('token', token);
+        $('regPassword').value = $('regConfirm').value = $('loginPassword').value = '';
+        await checkAuth();
+        if (mode === 'register') toast('账户创建成功');
+      } catch (error) { toast(error.message || '网络异常，请重试', 'error'); }
+      finally { button.disabled = false; button.textContent = label; }
+    }
+
+    async function loadPersonalNotifications() {
+      $('personalNotificationStatus').textContent = '正在读取通知配置…';
+      $('personalNotifications').replaceChildren();
+      try {
+        const response = await fetch('/api/notifications', { headers: authHeaders() });
+        const settings = await response.json();
+        if (!response.ok) throw new Error(settings.message);
+        for (const channel of ['wechat', 'qq']) {
+          const setting = settings.find(item => item.channel === channel) || { enabled: false, priceAlerts: true, dailyReport: true };
+          const section = document.createElement('div');
+          section.innerHTML = `<h3>${channel === 'wechat' ? '微信 · 公众号' : 'QQ · 机器人'}</h3>
+            <div class="field"><label><input id="${channel}Enabled" type="checkbox"> 启用通知</label></div>
+            <div class="field"><label for="${channel}Token">PushPlus Token</label><input id="${channel}Token" type="password" autocomplete="new-password" placeholder="${setting.configured ? '已保存，留空保留原令牌' : '填写已绑定账户的令牌'}"></div>
+            ${channel === 'qq' ? '<div class="field"><label for="qqDestination">QQ群渠道编码（留空发给自己）</label><input id="qqDestination" maxlength="100"></div>' : ''}
+            <div class="field"><label><input id="${channel}Price" type="checkbox"> 价格提醒</label> <label><input id="${channel}Daily" type="checkbox"> 长期推荐日报</label></div>
+            <div class="actions"><button class="btn" id="${channel}Save" onclick="savePersonalNotification('${channel}')">保存</button> <button class="btn secondary" id="${channel}Test" onclick="testPersonalNotification('${channel}')">测试已保存配置</button></div>
+            <a class="link-btn" href="https://www.pushplus.plus/doc/${channel === 'qq' ? 'channel/qq.html' : 'guide/api.html'}" target="_blank" rel="noopener noreferrer">${channel === 'qq' ? 'QQ 绑定与额度说明' : '微信绑定说明'}</a>`;
+          $('personalNotifications').appendChild(section);
+          $(channel + 'Enabled').checked = setting.enabled;
+          $(channel + 'Price').checked = setting.priceAlerts;
+          $(channel + 'Daily').checked = setting.dailyReport;
+          if (channel === 'qq') $('qqDestination').value = setting.destination || '';
+        }
+        $('personalNotificationStatus').textContent = '';
+      } catch (error) { $('personalNotificationStatus').textContent = error.message || '读取失败'; }
+    }
+
+    async function savePersonalNotification(channel) {
+      const button = $(channel + 'Save');
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/notifications/' + channel, { method: 'PUT', headers: authHeaders(), body: JSON.stringify({
+          enabled: $(channel + 'Enabled').checked, token: $(channel + 'Token').value.trim(),
+          destination: channel === 'qq' ? $('qqDestination').value.trim() : '',
+          priceAlerts: $(channel + 'Price').checked, dailyReport: $(channel + 'Daily').checked
+        }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message);
+        $(channel + 'Token').value = '';
+        $(channel + 'Token').placeholder = '留空保留已保存令牌';
+        toast('通知配置已保存，即时生效');
+      } catch (error) { toast(error.message || '保存失败', 'error'); }
+      finally { button.disabled = false; }
+    }
+
+    async function testPersonalNotification(channel) {
+      const button = $(channel + 'Test');
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/notifications/' + channel + '/test', { method: 'POST', headers: authHeaders() });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message);
+        $('personalNotificationStatus').textContent = result.message + '。流水号：' + result.receipt;
+      } catch (error) { toast(error.message || '测试失败', 'error'); }
+      finally { button.disabled = false; }
     }
 
     function logout() {
@@ -1011,7 +1116,8 @@
       $('authPage').style.display = 'none';
       $('appPage').style.display = '';
       updateUser();
-      await Promise.all([loadConfig(), loadAssets(), loadFactors(), loadRecommendations(), loadHistory()]);
+      restoreResearchFilter();
+      await Promise.all([loadConfig(), loadAssets(), loadFactors(), loadRecommendations(), loadHistory(), loadPersonalNotifications()]);
     }
 
     function updateToday() {
@@ -1062,6 +1168,7 @@
         $('telegramProxyHost').value = cfg.telegramProxyHost || '';
         $('telegramProxyPort').value = cfg.telegramProxyPort || '';
         $('telegramStat').textContent = cfg.telegramEnabled ? '已启用' : '已关闭';
+        $('dailyScheduleState').textContent = cfg.recommendationEnabled ? '调度已启用' : '调度未启用';
         $('limitStat').textContent = cfg.recommendationLimit ?? 5;
         $('scoreStat').textContent = cfg.recommendationMinScore ?? 55;
         $('telegramPriceStatus').innerHTML = cfg.telegramEnabled ? '<span class="status-pill green">正常运行</span>' : '<span class="status-pill orange">未启用</span>';
@@ -1151,23 +1258,34 @@
 
     async function loadRecommendations() {
       const targets = [$('dashboardRecommendations'), $('recommendationGrid')].filter(Boolean);
-      targets.forEach(el => el.innerHTML = '<div class="empty">正在生成推荐...</div>');
+      targets.forEach(el => el.innerHTML = '<div class="empty">正在读取推荐快照...</div>');
       try {
-        const res = await fetch('/api/recommendations/staged', { headers: authHeaders() });
+        const res = await fetch('/api/recommendations/latest', { headers: authHeaders() });
         const data = await res.json();
         if (!data.success) throw new Error(data.message);
         cachedRecommendations = data.recommendations || { monthly: [], quarterly: [], yearly: [] };
         const html = renderRecommendationLanes(cachedRecommendations);
         $('dashboardRecommendations').innerHTML = html;
-        $('recommendationGrid').innerHTML = html;
+        renderResearchWorkbench();
+        $('researchLoadedAt').textContent = data.run ? '推荐快照：' + dateTime(data.run.generatedAt) + ' · 来源 ' + data.run.source + (Date.now() / 1000 - data.run.generatedAt > 86400 ? ' · 超过 24 小时，待更新' : '') : '尚未保存推荐快照';
+        $('dashboardSnapshotDate').textContent = $('researchLoadedAt').textContent;
         const top = Object.values(cachedRecommendations).flat()[0];
         if (top) $('snapshotScore').textContent = top.score;
       } catch (e) {
+        cachedRecommendations = { monthly: [], quarterly: [], yearly: [] };
+        researchSelections.clear();
+        renderResearchWorkbench();
+        $('researchLoadedAt').textContent = '推荐数据未就绪';
+        $('dashboardSnapshotDate').textContent = '推荐数据未就绪';
         targets.forEach(el => el.innerHTML = `<div class="empty">推荐加载失败：${escapeHtml(e.message)}</div>`);
       }
     }
 
     async function generateSavedRun() {
+      const button = $('generateRunButton');
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
       const res = await fetch('/api/recommendations/run', { method: 'POST', headers: authHeaders() });
       const data = await res.json();
       if (!data.success) return toast(data.message || '生成失败', 'error');
@@ -1175,8 +1293,12 @@
       cachedRecommendations = data.recommendations;
       const html = renderRecommendationLanes(cachedRecommendations);
       $('dashboardRecommendations').innerHTML = html;
-      $('recommendationGrid').innerHTML = html;
+      renderResearchWorkbench();
+      $('researchLoadedAt').textContent = '已保存快照 · ' + new Date().toLocaleString('zh-CN');
+      $('dashboardSnapshotDate').textContent = $('researchLoadedAt').textContent;
       await loadHistory();
+      } catch (error) { toast(error.message || '生成失败', 'error'); }
+      finally { button.disabled = false; }
     }
 
     function renderRecommendationLanes(staged) {
@@ -1192,7 +1314,7 @@
       return `<div class="recommend-item">
         <div class="asset-logo">${escapeHtml(item.symbol).slice(0, 2)}</div>
         <div><b>${escapeHtml(item.name || item.symbol)}</b><small>${escapeHtml(item.symbol)} · ${reasonText(item)}</small></div>
-        <div class="recommend-score">推荐分 ${item.score}${iconSpark(stroke)}</div>
+        <div class="recommend-score">推荐分 ${item.score}<small>${escapeHtml(actionText[item.action] || item.action)}</small></div>
       </div>`;
     }
 
@@ -1310,14 +1432,20 @@
     }
 
     async function loadHistory() {
-      const res = await fetch('/api/recommendations/history', { headers: authHeaders() });
+      try {
+      const res = await fetch('/api/recommendations/history?limit=500', { headers: authHeaders() });
       const data = await res.json();
-      if (!data.success) return $('historyTable').innerHTML = `<div class="empty">${escapeHtml(data.message)}</div>`;
+      if (!res.ok || !data.success) throw new Error(data.message || '历史加载失败');
       currentHistoryItems = data.history || [];
       const runIds = new Set(currentHistoryItems.map(item => item.runId));
       $('runCountStat').textContent = runIds.size;
-      $('historyTable').innerHTML = renderHistoryTable(currentHistoryItems);
+      renderReviewWorkbench();
       $('dashboardHistoryTable').innerHTML = renderCompactHistory(currentHistoryItems.slice(0, 6));
+      } catch (error) {
+        currentHistoryItems = [];
+        renderReviewWorkbench();
+        $('historyTable').innerHTML = `<div class="empty">${escapeHtml(error.message || '历史加载失败')}</div>`;
+      }
     }
 
     function renderCompactHistory(items) {
@@ -1330,9 +1458,9 @@
     function renderHistoryTable(items, compact = false) {
       if (!items.length) return '<div class="empty">还没有推荐历史。点击“生成并保存”先创建快照。</div>';
       if (compact) return renderCompactHistory(items);
-      return `<table class="table"><thead><tr><th>时间</th><th>阶段</th><th>股票</th><th>评分</th><th>因子快照</th><th>复盘</th></tr></thead><tbody>${items.map((item, i) => `
+      return `<table class="table"><thead><tr><th>时间</th><th>阶段</th><th>股票</th><th>评分</th><th>因子快照</th><th>复盘</th></tr></thead><tbody>${items.map(item => { const i = currentHistoryItems.indexOf(item); return `
         <tr><td>${dateTime(item.generatedAt)}<br><small>${escapeHtml(item.source)}</small></td><td><span class="status-pill blue">${horizonLabel(item.horizon)}</span></td><td><b>${escapeHtml(item.symbol)}</b><br><small>${escapeHtml(item.name)}</small></td><td><b>${item.score}</b><br><span class="status-pill ${actionClass(item.action)}">${actionText[item.action] || item.action}</span></td><td>${renderHistoryFactors(item.factorContributions || [])}</td><td><div class="review-box"><div class="review-row"><select id="reviewOutcome${i}"><option value="pending" ${item.reviewOutcome === 'pending' || !item.reviewOutcome ? 'selected' : ''}>待复盘</option><option value="accurate" ${item.reviewOutcome === 'accurate' ? 'selected' : ''}>准确</option><option value="mixed" ${item.reviewOutcome === 'mixed' ? 'selected' : ''}>部分准确</option><option value="inaccurate" ${item.reviewOutcome === 'inaccurate' ? 'selected' : ''}>不准确</option></select><input id="reviewReturn${i}" type="number" step="0.01" placeholder="实际收益%" value="${item.actualReturn ?? ''}" /><button class="btn secondary small" onclick="saveReview(${i})">保存</button></div><textarea id="reviewReason${i}" placeholder="为什么准确或不准确">${escapeHtml(item.reviewReason || '')}</textarea></div></td></tr>
-      `).join('')}</tbody></table>`;
+      `; }).join('')}</tbody></table>`;
     }
 
     function renderHistoryFactors(items) {

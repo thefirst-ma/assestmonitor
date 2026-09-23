@@ -4,6 +4,9 @@
   "description": "Universal investment asset monitoring platform",
   "main": "dist/index.js",
   "scripts": {
+    "test:research": "node --test tests/research-tools.test.cjs",
+    "test:notifications": "tsx --test tests/notifications.test.ts",
+    "db:notifications": "node sql/setup-notifications.cjs",
     "dev": "tsx watch src/server.ts",
     "dev:cli": "tsx watch src/index.ts",
     "build": "tsc",

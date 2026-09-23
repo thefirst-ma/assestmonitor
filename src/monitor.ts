@@ -1,6 +1,7 @@
 import { database } from './database';
 import { priceService } from './services/price';
 import { NotificationService } from './services/notifier';
+import { notifyUser } from './services/user-notifications';
 import { config, PRICE_ALERT_LOOKBACK_SECONDS, ALERT_COOLDOWN_SECONDS } from './config';
 import { PriceAlert, Asset, AssetType } from './types';
 
@@ -181,6 +182,8 @@ export class InvestmentMonitor {
           };
           console.log(`  🔔 触发通知 (${reason}): ${alertChange > 0 ? '+' : ''}${alertChange.toFixed(2)}%`);
           await this.notifier.sendAlertWithoutTelegram(alert);
+          await notifyUser(asset.userId, 'priceAlerts', `${asset.name} 价格提醒`,
+            `${asset.name} (${asset.symbol})\n参考价: ${alert.oldPrice}\n当前价: ${alert.newPrice}\n变化: ${alert.changePercent.toFixed(2)}%`);
           const mergeKey = this.sharedChannelDedupeKey(asset);
           if (!telegramMergeBatch.has(mergeKey)) telegramMergeBatch.set(mergeKey, []);
           telegramMergeBatch.get(mergeKey)!.push(alert);
