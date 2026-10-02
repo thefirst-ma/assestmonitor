@@ -1,6 +1,6 @@
 import initSqlJs from 'sql.js';
 import type { Database as SqlJsDatabase } from 'sql.js';
-import mysql, { Pool } from 'mysql2/promise';
+import mysql, { Pool, PoolConnection } from 'mysql2/promise';
 import { DATABASE_PATH, databaseConfig } from '../config';
 import {
   Asset,
@@ -38,7 +38,56 @@ interface DatabaseBackend {
   init(): Promise<void>;
   exec(sql: string, params?: SqlParam[]): Promise<QueryResult>;
   run(sql: string, params?: SqlParam[]): Promise<void>;
+  runAffected(sql: string, params?: SqlParam[]): Promise<number>;
   close?(): Promise<void>;
+}
+
+export interface AuthUser extends User {
+  authVersion: number;
+}
+
+interface PasswordResetRow {
+  code_hash: string;
+  expires_at: number;
+  resend_after: number;
+  attempts: number;
+  send_count: number;
+  window_started_at: number;
+  status: string;
+}
+
+const PASSWORD_RESET_SEND_WINDOW_SECONDS = 3600;
+const PASSWORD_RESET_SEND_LIMIT = 3;
+const PASSWORD_RESET_RESEND_SECONDS = 60;
+const PASSWORD_RESET_CODE_SECONDS = 600;
+const PASSWORD_RESET_ATTEMPT_LIMIT = 5;
+const PASSWORD_RESET_SOURCE_WINDOW_SECONDS = 900;
+const PASSWORD_RESET_SOURCE_LIMIT = 12;
+
+function nextPasswordResetWindow(row: PasswordResetRow | undefined, now: number): { startedAt: number; count: number } | null {
+  // A delivery failure should be retryable immediately, while still counting
+  // toward the hourly cap to prevent repeated SMTP attempts.
+  if (row && row.status !== 'failed' && now < Number(row.resend_after)) return null;
+  const withinWindow = !!row && now - Number(row.window_started_at) < PASSWORD_RESET_SEND_WINDOW_SECONDS;
+  if (withinWindow && Number(row!.send_count) >= PASSWORD_RESET_SEND_LIMIT) return null;
+  return { startedAt: withinWindow ? Number(row!.window_started_at) : now, count: withinWindow ? Number(row!.send_count) + 1 : 1 };
+}
+
+function resetCodeMatches(stored: string, supplied: string): boolean {
+  if (!/^[a-f0-9]{64}$/i.test(stored) || !/^[a-f0-9]{64}$/i.test(supplied)) return false;
+  return crypto.timingSafeEqual(Buffer.from(stored, 'hex'), Buffer.from(supplied, 'hex'));
+}
+
+function sqlJsPasswordResetRow(db: SqlJsDatabase, userId: string): PasswordResetRow | undefined {
+  const result = db.exec(
+    'SELECT code_hash, expires_at, resend_after, attempts, send_count, window_started_at, status FROM password_reset_codes WHERE user_id = ?',
+    [userId]
+  );
+  const row = result[0]?.values[0];
+  return row ? {
+    code_hash: String(row[0]), expires_at: Number(row[1]), resend_after: Number(row[2]),
+    attempts: Number(row[3]), send_count: Number(row[4]), window_started_at: Number(row[5]), status: String(row[6])
+  } : undefined;
 }
 
 class SqlJsBackend implements DatabaseBackend {
@@ -68,6 +117,28 @@ class SqlJsBackend implements DatabaseBackend {
     this.save();
   }
 
+  async runAffected(sql: string, params: SqlParam[] = []): Promise<number> {
+    this.database.run(sql, params as any[]);
+    const affected = Number(this.database.exec('SELECT changes()')[0]?.values[0]?.[0] || 0);
+    this.save();
+    return affected;
+  }
+
+  transaction<T>(action: (db: SqlJsDatabase) => T): T {
+    this.database.run('BEGIN IMMEDIATE');
+    let committed = false;
+    try {
+      const result = action(this.database);
+      this.database.run('COMMIT');
+      committed = true;
+      this.save();
+      return result;
+    } catch (error) {
+      if (!committed) this.database.run('ROLLBACK');
+      throw error;
+    }
+  }
+
   private get database(): SqlJsDatabase {
     if (!this.db) throw new Error('Database is not initialized');
     return this.db;
@@ -83,6 +154,7 @@ class SqlJsBackend implements DatabaseBackend {
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        auth_version INTEGER NOT NULL DEFAULT 0,
         plan TEXT DEFAULT 'free',
         stripe_customer_id TEXT,
         stripe_subscription_id TEXT,
@@ -108,6 +180,23 @@ class SqlJsBackend implements DatabaseBackend {
         FOREIGN KEY (asset_id) REFERENCES assets(id)
       );`,
       `CREATE INDEX IF NOT EXISTS idx_prices_asset_timestamp ON prices(asset_id, timestamp);`,
+      `CREATE TABLE IF NOT EXISTS password_reset_codes (
+        user_id TEXT PRIMARY KEY,
+        code_hash TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        resend_after INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        send_count INTEGER NOT NULL DEFAULT 1,
+        window_started_at INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );`,
+      `CREATE TABLE IF NOT EXISTS password_reset_rate_limits (
+        source_hash TEXT PRIMARY KEY,
+        window_started_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_password_reset_rate_limits_window ON password_reset_rate_limits(window_started_at);`,
       `CREATE TABLE IF NOT EXISTS research_profiles (
         symbol TEXT PRIMARY KEY,
         moat_score INTEGER NOT NULL,
@@ -184,6 +273,7 @@ class SqlJsBackend implements DatabaseBackend {
       `ALTER TABLE assets ADD COLUMN interval INTEGER DEFAULT NULL;`,
       `ALTER TABLE assets ADD COLUMN threshold REAL DEFAULT NULL;`,
       `ALTER TABLE assets ADD COLUMN user_id TEXT NOT NULL DEFAULT '';`,
+      `ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 0;`,
       `ALTER TABLE recommendation_items ADD COLUMN factor_contributions_json TEXT NOT NULL DEFAULT '[]';`
     ]) {
       try { this.database.run(migration); } catch {}
@@ -220,8 +310,14 @@ class MySqlBackend implements DatabaseBackend {
       namedPlaceholders: false,
       decimalNumbers: true
     });
-    await this.pool.query('SELECT 1');
-    await this.assertRequiredTables();
+    try {
+      await this.pool.query('SELECT 1');
+      await this.assertRequiredTables();
+    } catch (error) {
+      await this.pool.end();
+      this.pool = undefined;
+      throw error;
+    }
   }
 
   async exec(sql: string, params: SqlParam[] = []): Promise<QueryResult> {
@@ -236,6 +332,26 @@ class MySqlBackend implements DatabaseBackend {
 
   async run(sql: string, params: SqlParam[] = []): Promise<void> {
     await this.poolInstance.query(sql, params);
+  }
+
+  async runAffected(sql: string, params: SqlParam[] = []): Promise<number> {
+    const [result] = await this.poolInstance.query(sql, params);
+    return (result as { affectedRows?: number }).affectedRows || 0;
+  }
+
+  async transaction<T>(action: (connection: PoolConnection) => Promise<T>): Promise<T> {
+    const connection = await this.poolInstance.getConnection();
+    try {
+      await connection.beginTransaction();
+      const result = await action(connection);
+      await connection.commit();
+      return result;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   async close(): Promise<void> {
@@ -258,7 +374,9 @@ class MySqlBackend implements DatabaseBackend {
       'recommendation_runs',
       'recommendation_items',
       'recommendation_reviews',
-      'user_notifications'
+      'user_notifications',
+      'password_reset_codes',
+      'password_reset_rate_limits'
     ];
     const placeholders = required.map(() => '?').join(',');
     const rows = await this.rows<{ table_name: string }>(
@@ -268,8 +386,13 @@ class MySqlBackend implements DatabaseBackend {
     const found = new Set(rows.map(row => row.table_name));
     const missing = required.filter(table => !found.has(table));
     if (missing.length > 0) {
-      throw new Error(`MySQL 缺少必要表: ${missing.join(', ')}。请先执行 sql/ 下 001 至 004 的 *_mysql.sql 文件`);
+      throw new Error(`MySQL 缺少必要表: ${missing.join(', ')}。请先执行 sql/ 下的数据库迁移文件`);
     }
+    const columns = await this.rows<{ column_name: string }>(
+      'SELECT column_name FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ?',
+      [databaseConfig.mysql.database, 'users', 'auth_version']
+    );
+    if (!columns.length) throw new Error('MySQL 缺少 users.auth_version；请先执行 sql/006_password_reset_mysql.sql');
   }
 }
 
@@ -331,7 +454,7 @@ export class AssetDatabase {
     return databaseConfig.driver === 'mysql';
   }
 
-  async createUser(email: string, passwordHash: string): Promise<User> {
+  async createUser(email: string, passwordHash: string): Promise<AuthUser> {
     await this.init();
     const id = crypto.randomUUID();
     const now = Math.floor(Date.now() / 1000);
@@ -346,19 +469,177 @@ export class AssetDatabase {
         [id, email, passwordHash, 'free', now]
       );
     }
-    return { id, email, passwordHash, plan: 'free', createdAt: now };
+    return { id, email, passwordHash, authVersion: 0, plan: 'free', createdAt: now };
   }
 
-  async getUserByEmail(email: string): Promise<User | undefined> {
+  async getUserByEmail(email: string): Promise<AuthUser | undefined> {
     await this.init();
-    const rows = await this.queryRows<any>('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at FROM users WHERE email = ?', [email]);
+    const rows = await this.queryRows<any>('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at, auth_version FROM users WHERE email = ?', [email]);
     return rows[0] ? this.rowToUser(rows[0]) : undefined;
   }
 
-  async getUserById(id: string): Promise<User | undefined> {
+  async getUserById(id: string): Promise<AuthUser | undefined> {
     await this.init();
-    const rows = await this.queryRows<any>('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at FROM users WHERE id = ?', [id]);
+    const rows = await this.queryRows<any>('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at, auth_version FROM users WHERE id = ?', [id]);
     return rows[0] ? this.rowToUser(rows[0]) : undefined;
+  }
+
+  async getAuthVersionByUserId(id: string): Promise<number | undefined> {
+    await this.init();
+    const rows = await this.queryRows<any>('SELECT auth_version FROM users WHERE id = ?', [id]);
+    return rows[0] ? Number(this.getValue(rows[0], 'auth_version', 0)) : undefined;
+  }
+
+  async consumePasswordResetSourceQuota(sourceHash: string, now: number): Promise<boolean> {
+    await this.init();
+    if (this.backend instanceof MySqlBackend) {
+      const allowed = await this.backend.transaction(async connection => {
+        await connection.query(
+          'INSERT IGNORE INTO password_reset_rate_limits (source_hash, window_started_at, attempts) VALUES (?, ?, 0)',
+          [sourceHash, now]
+        );
+        const [rows] = await connection.query<any[]>(
+          'SELECT window_started_at, attempts FROM password_reset_rate_limits WHERE source_hash = ? FOR UPDATE',
+          [sourceHash]
+        );
+        const previous = rows[0] as { window_started_at: number; attempts: number };
+        const expired = now - Number(previous.window_started_at) >= PASSWORD_RESET_SOURCE_WINDOW_SECONDS;
+        const attempts = expired ? 1 : Number(previous.attempts) + 1;
+        await connection.query(
+          'UPDATE password_reset_rate_limits SET window_started_at = ?, attempts = ? WHERE source_hash = ?',
+          [expired ? now : Number(previous.window_started_at), attempts, sourceHash]
+        );
+        return attempts <= PASSWORD_RESET_SOURCE_LIMIT;
+      });
+      await this.maybeCleanupPasswordResetSources(now);
+      return allowed;
+    }
+    const allowed = (this.backend as SqlJsBackend).transaction(db => {
+      const result = db.exec(
+        'SELECT window_started_at, attempts FROM password_reset_rate_limits WHERE source_hash = ?', [sourceHash]
+      );
+      const previous = result[0]?.values[0];
+      const expired = !previous || now - Number(previous[0]) >= PASSWORD_RESET_SOURCE_WINDOW_SECONDS;
+      const attempts = expired ? 1 : Number(previous[1]) + 1;
+      db.run(`
+        INSERT INTO password_reset_rate_limits (source_hash, window_started_at, attempts) VALUES (?, ?, ?)
+        ON CONFLICT(source_hash) DO UPDATE SET window_started_at = excluded.window_started_at, attempts = excluded.attempts
+      `, [sourceHash, expired ? now : Number(previous[0]), attempts]);
+      return attempts <= PASSWORD_RESET_SOURCE_LIMIT;
+    });
+    await this.maybeCleanupPasswordResetSources(now);
+    return allowed;
+  }
+
+  private async maybeCleanupPasswordResetSources(now: number): Promise<void> {
+    if (crypto.randomInt(64) !== 0) return;
+    const cutoff = now - 24 * 3600;
+    try {
+      if (this.backend instanceof MySqlBackend) {
+        await this.backend.run(
+          'DELETE FROM password_reset_rate_limits WHERE window_started_at < ? ORDER BY window_started_at LIMIT 100',
+          [cutoff]
+        );
+      } else {
+        await this.backend.run(`
+          DELETE FROM password_reset_rate_limits WHERE source_hash IN (
+            SELECT source_hash FROM password_reset_rate_limits WHERE window_started_at < ?
+            ORDER BY window_started_at LIMIT 100
+          )
+        `, [cutoff]);
+      }
+    } catch {
+      console.error('Password reset rate-limit cleanup failed');
+    }
+  }
+
+  async reservePasswordResetCode(userId: string, codeHash: string, now: number): Promise<boolean> {
+    await this.init();
+    if (this.backend instanceof MySqlBackend) {
+      return this.backend.transaction(async connection => {
+        // Lock the user even when no reset row exists, so two requests cannot
+        // concurrently create separate first codes for the same account.
+        const [users] = await connection.query<any[]>('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
+        if (!users.length) return false;
+        const [rows] = await connection.query<any[]>(
+          'SELECT code_hash, expires_at, resend_after, attempts, send_count, window_started_at, status FROM password_reset_codes WHERE user_id = ? FOR UPDATE',
+          [userId]
+        );
+        const window = nextPasswordResetWindow(rows[0] as PasswordResetRow | undefined, now);
+        if (!window) return false;
+        await connection.query(`
+          INSERT INTO password_reset_codes (user_id, code_hash, expires_at, resend_after, attempts, send_count, window_started_at, status)
+          VALUES (?, ?, ?, ?, 0, ?, ?, 'pending')
+          ON DUPLICATE KEY UPDATE code_hash = VALUES(code_hash), expires_at = VALUES(expires_at),
+            resend_after = VALUES(resend_after), attempts = 0, send_count = VALUES(send_count),
+            window_started_at = VALUES(window_started_at), status = 'pending'
+        `, [userId, codeHash, now + PASSWORD_RESET_CODE_SECONDS, now + PASSWORD_RESET_RESEND_SECONDS, window.count, window.startedAt]);
+        return true;
+      });
+    }
+    return (this.backend as SqlJsBackend).transaction(db => {
+      if (!db.exec('SELECT id FROM users WHERE id = ?', [userId])[0]?.values.length) return false;
+      const window = nextPasswordResetWindow(sqlJsPasswordResetRow(db, userId), now);
+      if (!window) return false;
+      db.run(`
+        INSERT INTO password_reset_codes (user_id, code_hash, expires_at, resend_after, attempts, send_count, window_started_at, status)
+        VALUES (?, ?, ?, ?, 0, ?, ?, 'pending')
+        ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires_at = excluded.expires_at,
+          resend_after = excluded.resend_after, attempts = 0, send_count = excluded.send_count,
+          window_started_at = excluded.window_started_at, status = 'pending'
+      `, [userId, codeHash, now + PASSWORD_RESET_CODE_SECONDS, now + PASSWORD_RESET_RESEND_SECONDS, window.count, window.startedAt]);
+      return true;
+    });
+  }
+
+  async activatePasswordResetCode(userId: string, codeHash: string): Promise<boolean> {
+    await this.init();
+    return (await this.backend.runAffected(
+      "UPDATE password_reset_codes SET status = 'active' WHERE user_id = ? AND code_hash = ? AND status = 'pending'",
+      [userId, codeHash]
+    )) === 1;
+  }
+
+  async cancelPasswordResetCode(userId: string, codeHash: string): Promise<void> {
+    await this.init();
+    await this.backend.run(
+      "UPDATE password_reset_codes SET status = 'failed' WHERE user_id = ? AND code_hash = ? AND status = 'pending'",
+      [userId, codeHash]
+    );
+  }
+
+  async confirmPasswordResetCode(userId: string, codeHash: string, passwordHash: string, now: number): Promise<boolean> {
+    await this.init();
+    if (this.backend instanceof MySqlBackend) {
+      return this.backend.transaction(async connection => {
+        const [users] = await connection.query<any[]>('SELECT id FROM users WHERE id = ? FOR UPDATE', [userId]);
+        if (!users.length) return false;
+        const [rows] = await connection.query<any[]>(
+          'SELECT code_hash, expires_at, resend_after, attempts, send_count, window_started_at, status FROM password_reset_codes WHERE user_id = ? FOR UPDATE',
+          [userId]
+        );
+        const row = rows[0] as PasswordResetRow | undefined;
+        if (!row || row.status !== 'active' || Number(row.expires_at) <= now || Number(row.attempts) >= PASSWORD_RESET_ATTEMPT_LIMIT) return false;
+        if (!resetCodeMatches(row.code_hash, codeHash)) {
+          await connection.query('UPDATE password_reset_codes SET attempts = attempts + 1 WHERE user_id = ?', [userId]);
+          return false;
+        }
+        await connection.query('UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE id = ?', [passwordHash, userId]);
+        await connection.query('DELETE FROM password_reset_codes WHERE user_id = ?', [userId]);
+        return true;
+      });
+    }
+    return (this.backend as SqlJsBackend).transaction(db => {
+      const row = sqlJsPasswordResetRow(db, userId);
+      if (!row || row.status !== 'active' || row.expires_at <= now || row.attempts >= PASSWORD_RESET_ATTEMPT_LIMIT) return false;
+      if (!resetCodeMatches(row.code_hash, codeHash)) {
+        db.run('UPDATE password_reset_codes SET attempts = attempts + 1 WHERE user_id = ?', [userId]);
+        return false;
+      }
+      db.run('UPDATE users SET password_hash = ?, auth_version = auth_version + 1 WHERE id = ?', [passwordHash, userId]);
+      db.run('DELETE FROM password_reset_codes WHERE user_id = ?', [userId]);
+      return true;
+    });
   }
 
   async updateUserPlan(userId: string, plan: UserPlan, stripeCustomerId?: string, stripeSubscriptionId?: string): Promise<void> {
@@ -372,9 +653,9 @@ export class AssetDatabase {
     await this.backend.run('UPDATE users SET stripe_customer_id = ? WHERE id = ?', [stripeCustomerId, userId]);
   }
 
-  async getUserByStripeCustomerId(customerId: string): Promise<User | undefined> {
+  async getUserByStripeCustomerId(customerId: string): Promise<AuthUser | undefined> {
     await this.init();
-    const rows = await this.queryRows<any>('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at FROM users WHERE stripe_customer_id = ?', [customerId]);
+    const rows = await this.queryRows<any>('SELECT id, email, password_hash, plan, stripe_customer_id, stripe_subscription_id, created_at, auth_version FROM users WHERE stripe_customer_id = ?', [customerId]);
     return rows[0] ? this.rowToUser(rows[0]) : undefined;
   }
 
@@ -769,7 +1050,7 @@ export class AssetDatabase {
     return Array.isArray(row) ? row[index] : row?.[key];
   }
 
-  private rowToUser(row: any): User {
+  private rowToUser(row: any): AuthUser {
     return {
       id: String(this.getValue(row, 'id', 0)),
       email: String(this.getValue(row, 'email', 1)),
@@ -777,7 +1058,8 @@ export class AssetDatabase {
       plan: this.getValue(row, 'plan', 3) as UserPlan,
       stripeCustomerId: this.getValue(row, 'stripe_customer_id', 4) || undefined,
       stripeSubscriptionId: this.getValue(row, 'stripe_subscription_id', 5) || undefined,
-      createdAt: Number(this.getValue(row, 'created_at', 6))
+      createdAt: Number(this.getValue(row, 'created_at', 6)),
+      authVersion: Number(this.getValue(row, 'auth_version', 7) || 0)
     };
   }
 

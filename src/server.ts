@@ -4,7 +4,7 @@ import { database } from './database';
 import { config, recommendationConfig } from './config';
 import { priceService } from './services/price';
 import { NotificationService } from './services/notifier';
-import { authService } from './services/auth';
+import { authService, InvalidPasswordResetCodeError, InvalidSessionError, PasswordResetUnavailableError } from './services/auth';
 import { stripeService } from './services/stripe';
 import { stockAnalysisService } from './services/stock-analysis';
 import { recommendationService } from './services/recommendation';
@@ -26,6 +26,7 @@ import QRCode from 'qrcode';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { isIP } from 'net';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,6 +36,16 @@ export { app };
 function maskSecret(value: string, visibleEnd = 4): string {
   if (!value || value.length <= visibleEnd) return '****';
   return '****' + value.slice(-visibleEnd);
+}
+
+function passwordResetSource(req: Request): string {
+  // Vercel overwrites X-Forwarded-For with the public client IP. Outside
+  // Vercel, ignore this client-supplied header and use Express's socket IP.
+  if (process.env.VERCEL) {
+    const forwarded = req.header('x-forwarded-for')?.split(',')[0]?.trim();
+    if (forwarded && isIP(forwarded)) return forwarded;
+  }
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 // Stripe webhook needs raw body, must be before express.json()
@@ -60,7 +71,7 @@ interface AuthRequest extends Request {
   userEmail?: string;
 }
 
-function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): void {
+async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
     res.status(401).json({ success: false, message: '请先登录' });
@@ -69,12 +80,16 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): vo
 
   try {
     const token = header.slice(7);
-    const { userId, email } = authService.verifyToken(token);
+    const { userId, email } = await authService.verifyToken(token);
     req.userId = userId;
     req.userEmail = email;
     next();
   } catch (error: any) {
-    res.status(401).json({ success: false, message: error.message });
+    if (error instanceof InvalidSessionError) {
+      res.status(401).json({ success: false, message: error.message });
+    } else {
+      res.status(503).json({ success: false, message: '认证服务暂不可用，请稍后重试' });
+    }
   }
 }
 
@@ -190,6 +205,34 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+app.post('/api/auth/password-reset/request', async (req: Request, res: Response) => {
+  try {
+    const message = await authService.requestPasswordReset(req.body?.email, passwordResetSource(req));
+    res.json({ success: true, message });
+  } catch (error: any) {
+    if (error.message === '请输入有效邮箱') {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+    // The same server error is returned for any sender/database failure.
+    res.status(503).json({ success: false, message: new PasswordResetUnavailableError().message });
+  }
+});
+
+app.post('/api/auth/password-reset/confirm', async (req: Request, res: Response) => {
+  try {
+    await authService.confirmPasswordReset(req.body?.email, req.body?.code, req.body?.newPassword, passwordResetSource(req));
+    res.json({ success: true, message: '密码已重置，请重新登录' });
+  } catch (error: any) {
+    if (error instanceof InvalidPasswordResetCodeError || error.message === '请输入有效邮箱'
+      || error.message === '密码至少 8 位，最多 72 字节') {
+      res.status(400).json({ success: false, message: error.message });
+      return;
+    }
+    res.status(503).json({ success: false, message: '密码重置暂不可用，请稍后重试' });
   }
 });
 

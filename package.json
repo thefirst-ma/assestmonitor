@@ -6,6 +6,7 @@
   "scripts": {
     "test:research": "node --test tests/research-tools.test.cjs",
     "test:security": "tsx --test tests/admin-access.test.ts tests/asset-ownership.test.ts",
+    "test:password-reset": "tsx --test tests/password-reset.test.ts",
     "test:privacy": "tsx --test tests/recommendation-privacy.test.ts",
     "test:assets": "tsx --test tests/asset-ownership.test.ts",
     "test:notifications": "tsx --test tests/notifications.test.ts",

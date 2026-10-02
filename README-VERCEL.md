@@ -11,6 +11,14 @@
 - 推荐任务：`RECOMMENDATION_ENABLED=true`，以及按需配置的推荐股票池和评分参数。
 - 管理员：`ADMIN_EMAILS`，填写已注册用户的登录邮箱；多个邮箱以逗号分隔。未配置时普通用户仍可查看自己的资产和共享研究结果，但不能修改全局因子、研究档案、复盘或系统设置。
 
+### 邮箱验证码改密
+
+发布改密功能前，先在生产 MySQL 执行 `sql/006_password_reset_mysql.sql`。登录页的“忘记密码”和登录后的“修改密码”使用同一流程：向账户邮箱发送验证码，核对验证码后设置新密码。改密成功会使此前的登录令牌失效。
+
+在 Vercel 的 Production 环境变量中配置 `EMAIL_HOST`、`EMAIL_PORT`、`EMAIL_USER`、`EMAIL_PASS`。`EMAIL_USER` 是发件邮箱，`EMAIL_PASS` 应为邮件服务提供的 SMTP 授权码，不要填邮箱网页登录密码，也不要写入仓库或聊天。`EMAIL_ENABLED` 只控制价格告警邮件，不控制改密验证码。未配置发件变量时，验证码接口会显示“邮件服务暂不可用”；若发件凭据错误，接口为保护账号信息仍返回通用提示，但验证码不会生效，运行日志会记录不含邮箱和验证码的故障类别。修改环境变量后需重新部署，并用实际账户邮箱检查邮件是否送达。
+
+如果选择 Gmail 发件，可使用 `smtp.gmail.com` 和端口 `587`，并按 [Google 官方说明](https://support.google.com/accounts/answer/185833)创建应用专用密码；创建前需要为该 Google 账号启用两步验证。Vercel 允许从函数连接 SMTP 端口 587，但[官方建议](https://vercel.com/kb/guide/serverless-functions-and-smtp)等待邮件发送完成后再返回响应。
+
 不要直接重新运行 `deploy/configure-vercel.cjs`：它会生成新的 JWT、Cron 等密钥，可能使现有登录和通知配置失效。
 
 ## 发布与验证
@@ -21,6 +29,7 @@ npm run build
 npm run test:research
 npm run test:notifications
 npm run test:security
+npm run test:password-reset
 npm run test:privacy
 npm run test:monitor
 npx vercel deploy --prod --yes --scope thefirstmas-projects

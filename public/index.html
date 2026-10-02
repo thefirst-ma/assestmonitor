@@ -89,6 +89,8 @@
       font-weight: 800;
     }
     .auth-tabs button.active { background: #fff; color: var(--blue); box-shadow: var(--soft-shadow); }
+    .auth-check { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #f7faff; }
+    .auth-check p { margin: 0 0 14px; color: #344054; font-size: 14px; line-height: 1.6; }
 
     .field { display: grid; gap: 7px; margin-bottom: 13px; }
     .field label { font-size: 13px; color: #344054; font-weight: 800; }
@@ -131,6 +133,11 @@
     .btn.ghost { background: #f3f6fb; color: #334155; box-shadow: none; }
     .btn.danger { background: var(--red); box-shadow: none; }
     .btn.small { min-height: 30px; padding: 6px 10px; font-size: 12px; }
+    .password-link { display: block; margin: 12px 0 0 auto; padding: 2px 0; border: 0; background: none; color: var(--blue); font-size: 13px; font-weight: 800; }
+    .password-dialog { width: min(440px, calc(100% - 32px)); }
+    .password-reset-note { margin: 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .password-reset-status { margin: 12px 0 0; min-height: 20px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .password-reset-status.error { color: var(--red); }
 
     .app {
       min-height: 100vh;
@@ -637,21 +644,28 @@
           <p>面向月度、季度、年度的长期关注与推荐</p>
         </div>
       </div>
-      <div class="auth-tabs">
-        <button id="loginTab" class="active" onclick="switchAuth('login')">登录</button>
-        <button id="registerTab" onclick="switchAuth('register')">注册</button>
+      <div id="authCheck" class="auth-check" hidden>
+        <p id="authCheckMessage" role="status" aria-live="polite">正在验证登录状态…</p>
+        <button id="authRetry" type="button" class="btn secondary" onclick="checkAuth()" hidden>重试连接</button>
       </div>
-      <form id="loginForm" onsubmit="event.preventDefault(); login()">
-        <div class="field"><label>邮箱</label><input id="loginEmail" type="email" autocomplete="email" /></div>
-        <div class="field"><label>密码</label><input id="loginPassword" type="password" autocomplete="current-password" /></div>
-        <button id="loginSubmit" type="submit" class="btn" style="width:100%;">登录系统</button>
-      </form>
-      <form id="registerForm" style="display:none;" onsubmit="event.preventDefault(); register()">
-        <div class="field"><label for="regEmail">邮箱</label><input id="regEmail" type="email" maxlength="254" required autocomplete="email" /></div>
-        <div class="field"><label for="regPassword">密码</label><input id="regPassword" type="password" minlength="8" maxlength="72" required autocomplete="new-password" placeholder="至少 8 位" /></div>
-        <div class="field"><label for="regConfirm">确认密码</label><input id="regConfirm" type="password" required autocomplete="new-password" /></div>
-        <button id="registerSubmit" type="submit" class="btn" style="width:100%;">创建账户</button>
-      </form>
+      <div id="authForms">
+        <div class="auth-tabs">
+          <button id="loginTab" class="active" onclick="switchAuth('login')">登录</button>
+          <button id="registerTab" onclick="switchAuth('register')">注册</button>
+        </div>
+        <form id="loginForm" onsubmit="event.preventDefault(); login()">
+          <div class="field"><label>邮箱</label><input id="loginEmail" type="email" autocomplete="email" /></div>
+          <div class="field"><label>密码</label><input id="loginPassword" type="password" autocomplete="current-password" /></div>
+          <button id="loginSubmit" type="submit" class="btn" style="width:100%;">登录系统</button>
+          <button type="button" class="password-link" onclick="openPasswordReset()">忘记密码？</button>
+        </form>
+        <form id="registerForm" style="display:none;" onsubmit="event.preventDefault(); register()">
+          <div class="field"><label for="regEmail">邮箱</label><input id="regEmail" type="email" maxlength="254" required autocomplete="email" /></div>
+          <div class="field"><label for="regPassword">密码</label><input id="regPassword" type="password" minlength="8" maxlength="72" required autocomplete="new-password" placeholder="至少 8 位" /></div>
+          <div class="field"><label for="regConfirm">确认密码</label><input id="regConfirm" type="password" required autocomplete="new-password" /></div>
+          <button id="registerSubmit" type="submit" class="btn" style="width:100%;">创建账户</button>
+        </form>
+      </div>
     </div>
   </div>
 
@@ -706,6 +720,7 @@
           </span>
           <div class="avatar" id="avatarInitial">投</div>
           <span class="user-chip">欢迎回来，<b id="userEmail">投资者</b></span>
+          <button class="btn ghost small" onclick="openPasswordReset(true)">修改密码</button>
           <button class="btn ghost small" onclick="logout()">退出</button>
         </div>
       </header>
@@ -963,6 +978,19 @@
     <div class="panel-head"><h2 id="researchDialogTitle">推荐对比</h2><button class="research-close" title="关闭" aria-label="关闭对比" onclick="$('researchDialog').close()">×</button></div>
     <div id="researchDialogBody"></div>
   </dialog>
+  <dialog id="passwordResetDialog" class="research-dialog password-dialog" aria-labelledby="passwordResetTitle" onclose="clearPasswordResetSecrets()">
+    <div class="panel-head"><h2 id="passwordResetTitle">重设密码</h2><button type="button" class="research-close" title="关闭" aria-label="关闭重设密码" onclick="$('passwordResetDialog').close()">×</button></div>
+    <p class="password-reset-note">输入账户邮箱并获取 6 位验证码，再设置新密码。若邮箱已注册，验证码会发送到该邮箱。</p>
+    <form id="passwordResetForm" onsubmit="event.preventDefault(); confirmPasswordReset()">
+      <div class="field"><label for="passwordResetEmail">账户邮箱</label><input id="passwordResetEmail" type="email" maxlength="254" required autocomplete="email" /></div>
+      <button id="passwordCodeButton" type="button" class="btn secondary" onclick="requestPasswordCode()">发送验证码</button>
+      <div class="field" style="margin-top:16px;"><label for="passwordResetCode">邮箱验证码</label><input id="passwordResetCode" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autocomplete="one-time-code" placeholder="6 位数字" /></div>
+      <div class="field"><label for="passwordResetNewPassword">新密码</label><input id="passwordResetNewPassword" type="password" minlength="8" maxlength="72" required autocomplete="new-password" placeholder="至少 8 位" /></div>
+      <div class="field"><label for="passwordResetConfirm">确认新密码</label><input id="passwordResetConfirm" type="password" minlength="8" maxlength="72" required autocomplete="new-password" /></div>
+      <button id="passwordResetSubmit" type="submit" class="btn" style="width:100%;">确认修改密码</button>
+      <p id="passwordResetStatus" class="password-reset-status" role="status" aria-live="polite"></p>
+    </form>
+  </dialog>
   <script src="/research-workbench.js"></script>
   <script>
     const horizonMeta = {
@@ -988,6 +1016,11 @@
     let assetLoadVersion = 0;
     let chartAssetType = 'stock';
     let cachedRecommendations = { monthly: [], quarterly: [], yearly: [] };
+    let passwordCodeCooldownUntil = 0;
+    let passwordCodeTimer = null;
+    let passwordCodePending = false;
+    let passwordResetPending = false;
+    let authCheckRequestId = 0;
 
     function iconSpark(color = '#2563eb') {
       return `<svg class="spark" viewBox="0 0 60 30" aria-hidden="true"><path d="M2 23 L10 18 L17 22 L25 11 L34 15 L43 8 L58 5" fill="none" stroke="${color}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
@@ -999,6 +1032,109 @@
       el.textContent = message;
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 2600);
+    }
+
+    function setPasswordResetStatus(message, isError = false) {
+      const status = $('passwordResetStatus');
+      status.textContent = message;
+      status.classList.toggle('error', isError);
+    }
+
+    function updatePasswordCodeButton() {
+      const button = $('passwordCodeButton');
+      const seconds = Math.max(0, Math.ceil((passwordCodeCooldownUntil - Date.now()) / 1000));
+      button.disabled = passwordCodePending || seconds > 0;
+      button.textContent = passwordCodePending ? '发送中…' : seconds ? `${seconds} 秒后重试` : '发送验证码';
+      if (!seconds && passwordCodeTimer) {
+        clearInterval(passwordCodeTimer);
+        passwordCodeTimer = null;
+      }
+    }
+
+    function startPasswordCodeCooldown() {
+      passwordCodeCooldownUntil = Date.now() + 60 * 1000;
+      if (passwordCodeTimer) clearInterval(passwordCodeTimer);
+      passwordCodeTimer = setInterval(updatePasswordCodeButton, 1000);
+      updatePasswordCodeButton();
+    }
+
+    function openPasswordReset(fromAccount = false) {
+      const dialog = $('passwordResetDialog');
+      if (dialog.open) return;
+      $('passwordResetForm').reset();
+      const ownAccount = Boolean(fromAccount && currentUser?.email);
+      $('passwordResetTitle').textContent = ownAccount ? '修改密码' : '重设密码';
+      $('passwordResetEmail').value = ownAccount ? currentUser.email : $('loginEmail').value.trim();
+      $('passwordResetEmail').readOnly = ownAccount;
+      setPasswordResetStatus('');
+      updatePasswordCodeButton();
+      dialog.showModal();
+      $('passwordResetEmail').focus();
+    }
+
+    function clearPasswordResetSecrets() {
+      for (const id of ['passwordResetCode', 'passwordResetNewPassword', 'passwordResetConfirm']) $(id).value = '';
+      setPasswordResetStatus('');
+    }
+
+    async function requestPasswordCode() {
+      const input = $('passwordResetEmail');
+      input.value = input.value.trim().toLowerCase();
+      if (!input.reportValidity() || passwordCodePending || Date.now() < passwordCodeCooldownUntil) return;
+      passwordCodePending = true;
+      updatePasswordCodeButton();
+      setPasswordResetStatus('正在处理验证码请求…');
+      try {
+        const response = await fetch('/api/auth/password-reset/request', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: input.value })
+        });
+        const result = await response.json().catch(() => null);
+        if (response.status === 503 || (response.ok && result?.success !== true)) {
+          setPasswordResetStatus('邮件服务暂不可用，请稍后重试。', true);
+          return;
+        }
+        startPasswordCodeCooldown();
+        setPasswordResetStatus('如果该邮箱已注册，验证码将发送至邮箱。请检查收件箱和垃圾邮件；未收到时请稍后重试。');
+      } catch {
+        setPasswordResetStatus('暂时无法发送验证码，请稍后重试。', true);
+      } finally {
+        passwordCodePending = false;
+        updatePasswordCodeButton();
+      }
+    }
+
+    async function confirmPasswordReset() {
+      if (passwordResetPending || !$('passwordResetForm').reportValidity()) return;
+      const email = $('passwordResetEmail').value.trim().toLowerCase();
+      const code = $('passwordResetCode').value.trim();
+      const newPassword = $('passwordResetNewPassword').value;
+      if (!/^\d{6}$/.test(code)) return setPasswordResetStatus('请输入 6 位数字验证码。', true);
+      if (newPassword !== $('passwordResetConfirm').value) return setPasswordResetStatus('两次输入的新密码不一致。', true);
+      if (new TextEncoder().encode(newPassword).length > 72) return setPasswordResetStatus('新密码不能超过 72 字节，请适当缩短。', true);
+      const button = $('passwordResetSubmit');
+      passwordResetPending = true;
+      button.disabled = true;
+      button.textContent = '正在修改…';
+      setPasswordResetStatus('正在验证验证码并修改密码…');
+      try {
+        const response = await fetch('/api/auth/password-reset/confirm', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code, newPassword })
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || result?.success !== true) throw new Error('reset-rejected');
+        $('passwordResetDialog').close();
+        if (currentUser) logout();
+        switchAuth('login');
+        $('loginEmail').value = email;
+        $('loginPassword').value = '';
+        toast('密码已更新，请使用新密码登录。');
+      } catch {
+        setPasswordResetStatus('无法完成修改。请检查验证码和新密码后重试。', true);
+      } finally {
+        passwordResetPending = false;
+        button.disabled = false;
+        button.textContent = '确认修改密码';
+      }
     }
 
     function switchAuth(mode) {
@@ -1095,6 +1231,7 @@
     }
 
     function logout() {
+      authCheckRequestId++;
       localStorage.removeItem('token');
       token = null;
       currentUser = null;
@@ -1110,21 +1247,54 @@
       $('dashboardHistoryTable').innerHTML = '<div class="empty">待读取</div>';
       $('appPage').style.display = 'none';
       $('authPage').style.display = '';
+      $('authCheck').hidden = true;
+      $('authForms').hidden = false;
+      switchAuth('login');
     }
 
     async function checkAuth() {
       updateToday();
-      if (!token) { $('authPage').style.display = ''; return; }
-      const res = await fetch('/api/auth/me', { headers: authHeaders() });
-      if (!res.ok) return logout();
-      currentUser = await res.json();
+      const requestId = ++authCheckRequestId;
+      if (!token) {
+        $('appPage').style.display = 'none';
+        $('authPage').style.display = '';
+        $('authCheck').hidden = true;
+        $('authForms').hidden = false;
+        return;
+      }
+      const checkedToken = token;
+      $('appPage').style.display = 'none';
+      $('authPage').style.display = '';
+      $('authForms').hidden = true;
+      $('authCheck').hidden = false;
+      $('authRetry').hidden = true;
+      $('authCheckMessage').textContent = '正在验证登录状态…';
+      let profile;
+      try {
+        const res = await fetch('/api/auth/me', { headers: authHeaders() });
+        if (requestId !== authCheckRequestId || token !== checkedToken) return;
+        if (res.status === 401) return logout();
+        if (!res.ok) throw new Error('登录校验暂不可用');
+        profile = await res.json();
+        if (requestId !== authCheckRequestId || token !== checkedToken) return;
+        if (!profile || typeof profile !== 'object' || !profile.email) throw new Error('登录校验响应无效');
+      } catch {
+        if (requestId === authCheckRequestId && token === checkedToken) {
+          $('authCheckMessage').textContent = '暂时无法验证登录状态。登录信息已保留，请稍后重试。';
+          $('authRetry').hidden = false;
+        }
+        return;
+      }
+      if (requestId !== authCheckRequestId || token !== checkedToken) return;
+      currentUser = profile;
+      $('authCheck').hidden = true;
       $('authPage').style.display = 'none';
       $('appPage').style.display = '';
       updateUser();
       restoreResearchFilter();
       const requests = [loadAssets(), loadFactors(), loadRecommendations(), loadHistory(), loadPersonalNotifications()];
       if (currentUser.isAdmin) requests.push(loadConfig());
-      await Promise.all(requests);
+      await Promise.allSettled(requests);
     }
 
     function updateToday() {
