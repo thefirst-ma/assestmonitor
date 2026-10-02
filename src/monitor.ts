@@ -5,14 +5,22 @@ import { notifyUser } from './services/user-notifications';
 import { config, PRICE_ALERT_LOOKBACK_SECONDS, ALERT_COOLDOWN_SECONDS } from './config';
 import { PriceAlert, Asset, AssetType } from './types';
 
+interface MonitorGroup {
+  assets: Asset[];
+  timer?: NodeJS.Timeout;
+  active?: Promise<void>;
+}
+
 export class InvestmentMonitor {
   private notifier: NotificationService;
-  private timers: Map<string, NodeJS.Timeout> = new Map();
+  private groups: Map<number, MonitorGroup> = new Map();
+  private planRefresh: Promise<void> = Promise.resolve();
+  private activeChecks: Set<Promise<void>> = new Set();
   private running = false;
   /** 上次对该「逻辑标的」发出通知的时间（毫秒），用于冷却；加密货币按规范化交易对合并，避免 ETH 重复推送 */
   private lastAlertAt: Map<string, number> = new Map();
-  /** 本轮 checkGroup 内已告警过的逻辑键，同一轮内同一标的只推一条（即使冷却为 0） */
-  private alertRoundKeys: Set<string> = new Set();
+  /** 不同间隔组可能同时采价，通知完成前为同一逻辑标的保留告警权。 */
+  private activeAlertKeys: Set<string> = new Set();
   /** 告警后忽略该时间戳之前的采样参与窗口高/低计算，避免旧峰值/谷底在冷却结束后反复触发同类告警 */
   private alertWindowFloorSec: Map<string, number> = new Map();
 
@@ -21,6 +29,7 @@ export class InvestmentMonitor {
   }
 
   async start(): Promise<void> {
+    if (this.running) return;
     console.log('🚀 投资标的监控平台启动');
     console.log(`⏱️  默认监控间隔: ${config.interval / 1000}秒`);
     console.log(`📊 默认涨跌幅阈值: ±${config.threshold}%`);
@@ -31,29 +40,35 @@ export class InvestmentMonitor {
 
     await database.init();
     this.running = true;
-    await this.scheduleAll();
+    try {
+      await this.scheduleAll();
+    } catch (error) {
+      this.running = false;
+      throw error;
+    }
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.running = false;
-    for (const [id, timer] of this.timers) {
-      clearInterval(timer);
+    for (const group of this.groups.values()) {
+      if (group.timer) clearInterval(group.timer);
     }
-    this.timers.clear();
+    this.groups.clear();
+    await this.planRefresh.catch(() => undefined);
+    await Promise.all([...this.activeChecks]);
     console.log('⏹️  监控已停止');
   }
 
   async scheduleAll(): Promise<void> {
-    for (const [, timer] of this.timers) {
-      clearInterval(timer);
-    }
-    this.timers.clear();
+    const refresh = this.planRefresh.catch(() => undefined).then(() => this.reconcileGroups());
+    this.planRefresh = refresh;
+    await refresh;
+  }
 
+  private async reconcileGroups(): Promise<void> {
     const assets = await database.getEnabledAssets();
-    if (assets.length === 0) {
-      console.log('⚠️  没有配置监控资产');
-      return;
-    }
+    // stop() may have been called while the database query was pending.
+    if (!this.running) return;
 
     const groups = new Map<number, Asset[]>();
     for (const asset of assets) {
@@ -62,28 +77,63 @@ export class InvestmentMonitor {
       groups.get(interval)!.push(asset);
     }
 
+    for (const [interval, group] of this.groups) {
+      if (groups.has(interval)) continue;
+      if (group.timer) clearInterval(group.timer);
+      group.timer = undefined;
+      group.assets = [];
+      if (!group.active) this.groups.delete(interval);
+    }
+
+    if (assets.length === 0 && this.groups.size === 0) {
+      console.log('⚠️  没有配置监控资产');
+    }
+
     for (const [interval, groupAssets] of groups) {
+      const existing = this.groups.get(interval);
+      if (existing) {
+        // Keep the timer's phase. The next tick sees the latest assets and settings.
+        existing.assets = groupAssets;
+        if (existing.timer) continue;
+      }
       const names = groupAssets.map(a => a.name).join(', ');
       console.log(`⏱️  [${interval / 1000}s] ${names}`);
 
-      this.checkGroup(groupAssets);
-
-      const timer = setInterval(() => {
-        if (this.running) this.checkGroup(groupAssets).catch(console.error);
-      }, interval);
-      this.timers.set(`group_${interval}`, timer);
+      const group = existing || { assets: groupAssets };
+      group.timer = setInterval(() => this.startGroupCheck(group), interval);
+      this.groups.set(interval, group);
+      this.startGroupCheck(group);
     }
+  }
+
+  private startGroupCheck(group: MonitorGroup): void {
+    if (!this.running || group.active || group.assets.length === 0) return;
+    const check = this.checkGroup(group.assets)
+      .catch(error => console.error('❌ 资产组采价失败:', error))
+      .finally(() => {
+        group.active = undefined;
+        this.activeChecks.delete(check);
+        if (!group.timer && group.assets.length === 0) {
+          for (const [interval, current] of this.groups) {
+            if (current === group) this.groups.delete(interval);
+          }
+        }
+      });
+    group.active = check;
+    this.activeChecks.add(check);
   }
 
   private async checkGroup(assets: Asset[]): Promise<void> {
     const ts = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
     console.log(`\n🔍 [${ts}] 检查 ${assets.length} 个资产...`);
     const timestamp = Math.floor(Date.now() / 1000);
-    this.alertRoundKeys.clear();
+    const alertRoundKeys = new Set<string>();
+    const claimedAlertKeys = new Set<string>();
     const priceCache = new Map<string, number>();
     /** 跨用户、同 type+symbol 合并为一条 Telegram */
     const telegramMergeBatch = new Map<string, PriceAlert[]>();
 
+    try {
     for (const asset of assets) {
       try {
         const lastPrice = await database.getLatestPrice(asset.id);
@@ -153,22 +203,25 @@ export class InvestmentMonitor {
         }
 
         const dedupeKey = this.alertDedupeKey(asset);
-        const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
-        const lastAt = this.lastAlertAt.get(dedupeKey) || 0;
-        if (shouldAlert && cooldownMs > 0 && Date.now() - lastAt < cooldownMs) {
-          shouldAlert = false;
-        }
-        if (shouldAlert && this.alertRoundKeys.has(dedupeKey)) {
-          shouldAlert = false;
-        }
 
         const extra = ` 邻次${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}% | ${windowLabel} 高$${maxInWindow.toFixed(2)} 低$${minInWindow.toFixed(2)}`;
         console.log(`  ${emoji} ${asset.name}: $${currentPrice.toFixed(2)} (${changeConsecutive > 0 ? '+' : ''}${changeConsecutive.toFixed(2)}%) [阈值:${threshold}%]${extra}`);
 
         await database.savePrice({ assetId: asset.id, price: currentPrice, timestamp });
 
+        // Claim only after the last await, so simultaneous groups cannot both pass
+        // the cooldown check before either has recorded its alert.
+        const cooldownMs = ALERT_COOLDOWN_SECONDS * 1000;
+        const lastAt = this.lastAlertAt.get(dedupeKey) || 0;
+        if (shouldAlert && ((cooldownMs > 0 && Date.now() - lastAt < cooldownMs)
+          || alertRoundKeys.has(dedupeKey) || this.activeAlertKeys.has(dedupeKey))) {
+          shouldAlert = false;
+        }
+
         if (shouldAlert) {
-          this.alertRoundKeys.add(dedupeKey);
+          alertRoundKeys.add(dedupeKey);
+          this.activeAlertKeys.add(dedupeKey);
+          claimedAlertKeys.add(dedupeKey);
           this.lastAlertAt.set(dedupeKey, Date.now());
           const alert: PriceAlert = {
             assetId: asset.id,
@@ -197,6 +250,9 @@ export class InvestmentMonitor {
 
     for (const merged of telegramMergeBatch.values()) {
       await this.notifier.sendTelegramMerged(merged);
+    }
+    } finally {
+      for (const key of claimedAlertKeys) this.activeAlertKeys.delete(key);
     }
   }
 
@@ -244,8 +300,20 @@ export class InvestmentMonitor {
     if (this.running) await this.scheduleAll();
   }
 
+  async updateAssetForUser(id: string, userId: string, interval?: number, threshold?: number): Promise<void> {
+    await database.updateAssetForUser(id, userId, interval, threshold);
+    console.log(`✏️  已更新: ${id} [间隔:${(interval || config.interval) / 1000}s, 阈值:${threshold || config.threshold}%]`);
+    if (this.running) await this.scheduleAll();
+  }
+
   async removeAsset(id: string): Promise<void> {
     await database.removeAsset(id);
+    console.log(`🗑️  已移除监控: ${id}`);
+    if (this.running) await this.scheduleAll();
+  }
+
+  async removeAssetForUser(id: string, userId: string): Promise<void> {
+    await database.removeAssetForUser(id, userId);
     console.log(`🗑️  已移除监控: ${id}`);
     if (this.running) await this.scheduleAll();
   }

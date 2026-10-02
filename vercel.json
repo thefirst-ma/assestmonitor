@@ -1,6 +1,7 @@
 {
   "version": 2,
   "buildCommand": "npm run build",
+  "regions": ["hnd1"],
   "functions": {
     "api/index.js": {
       "includeFiles": "{dist/**,public/**,sql/notification_queries.json,sql/research_queries.json,sql/004_user_notifications_sqljs.sql}",

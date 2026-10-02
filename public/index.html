@@ -441,6 +441,7 @@
     .chart-card svg { width: 100%; height: 190px; display: block; }
     .legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; font-size: 12px; color: #475467; }
     .legend i { display: inline-block; width: 22px; height: 3px; border-radius: 999px; margin-right: 6px; vertical-align: middle; }
+    [hidden] { display: none !important; }
 
     .table {
       width: 100%;
@@ -677,7 +678,7 @@
         <button onclick="switchSection(event, 'history')"><span class="nav-icon">↺</span>推荐复盘</button>
         <button onclick="switchSection(event, 'notifications')"><span class="nav-icon">◇</span>通知中心</button>
         <button onclick="switchSection(event, 'datasources')"><span class="nav-icon">◎</span>数据源管理</button>
-        <button onclick="switchSection(event, 'settings')"><span class="nav-icon">⚙</span>系统设置</button>
+        <button id="settingsNav" onclick="switchSection(event, 'settings')"><span class="nav-icon">⚙</span>系统设置</button>
       </nav>
       <div class="sidebar-note">
         <div class="note-illustration"><div class="paper-chart"></div></div>
@@ -714,8 +715,8 @@
           <div class="dashboard-grid">
             <div>
               <div class="kpis">
-                <div class="kpi"><div class="kpi-icon blue">◔</div><div><small>候选资产</small><strong id="assetCountStat">0</strong><div class="delta">较昨日 0</div></div></div>
-                <div class="kpi"><div class="kpi-icon green">▰</div><div><small>价格记录</small><strong id="priceCountStat">0</strong><div class="delta positive">监控运行中</div></div></div>
+                <div class="kpi"><div class="kpi-icon blue">◔</div><div><small>候选资产</small><strong id="assetCountStat">0</strong><div class="delta">当前候选池</div></div></div>
+                <div class="kpi"><div class="kpi-icon green">▰</div><div><small>近 24 小时价格点</small><strong id="priceCountStat">0</strong><div id="priceCountNote" class="delta">暂无数据</div></div></div>
                 <div class="kpi"><div class="kpi-icon violet">⌬</div><div><small>推荐因子</small><strong id="factorCountStat">0</strong><div class="delta">已启用</div></div></div>
                 <div class="kpi"><div class="kpi-icon orange">▷</div><div><small>推荐运行记录</small><strong id="runCountStat">0</strong><div class="delta">历史快照</div></div></div>
               </div>
@@ -732,33 +733,16 @@
             <div class="right-stack">
               <div class="panel chart-card">
                 <div class="panel-head">
-                  <div><h3>资产价格走势</h3></div>
+                  <div><h3>近 24 小时监控价格走势</h3></div>
                   <div class="chart-tabs">
-                    <button class="seg active">股票</button>
-                    <button class="seg">加密货币</button>
-                    <button class="seg">贵金属</button>
-                    <button class="seg">外汇</button>
+                    <button class="seg active" data-price-type="stock" onclick="setPriceChartType('stock')">股票</button>
+                    <button class="seg" data-price-type="crypto" onclick="setPriceChartType('crypto')">加密货币</button>
+                    <button class="seg" data-price-type="metal" onclick="setPriceChartType('metal')">贵金属</button>
+                    <button class="seg" data-price-type="forex" onclick="setPriceChartType('forex')">外汇</button>
                   </div>
                 </div>
-                <div class="legend">
-                  <span><i style="background:#2563eb"></i>贵州茅台</span>
-                  <span><i style="background:#16a34a"></i>腾讯控股</span>
-                  <span><i style="background:#7c3aed"></i>宁德时代</span>
-                  <span><i style="background:#f59e0b"></i>黄金现货</span>
-                </div>
-                <svg viewBox="0 0 480 190" preserveAspectRatio="none" aria-hidden="true">
-                  <g stroke="#e6edf7" stroke-width="1">
-                    <path d="M32 20H460M32 63H460M32 106H460M32 149H460"/>
-                    <path d="M80 16V160M180 16V160M280 16V160M380 16V160"/>
-                  </g>
-                  <g fill="#667085" font-size="11">
-                    <text x="6" y="24">60%</text><text x="8" y="67">30%</text><text x="14" y="110">0%</text><text x="6" y="153">-30%</text>
-                  </g>
-                  <path d="M32 132 C62 112,78 98,102 105 S150 80,182 78 S235 52,274 60 S328 42,360 50 S414 22,460 40" fill="none" stroke="#2563eb" stroke-width="3"/>
-                  <path d="M32 136 C65 124,92 118,118 122 S174 106,210 112 S268 84,306 90 S376 64,460 76" fill="none" stroke="#16a34a" stroke-width="2.4"/>
-                  <path d="M32 138 C82 126,113 132,148 126 S214 112,256 118 S320 92,366 98 S420 82,460 92" fill="none" stroke="#7c3aed" stroke-width="2.4"/>
-                  <path d="M32 134 C88 148,122 142,170 150 S238 130,286 135 S360 118,460 116" fill="none" stroke="#f59e0b" stroke-width="2.4"/>
-                </svg>
+                <div id="priceChartLegend" class="legend"></div>
+                <div id="priceChartBody"><div class="empty">暂无数据</div></div>
               </div>
 
               <div class="panel">
@@ -778,7 +762,7 @@
                   <b>因子贡献快照</b>
                   <p style="margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.6;">每次推荐都会保存当时的因子、权重、评分和贡献，用于后续复盘。</p>
                 </div>
-                <div class="big-score"><strong id="snapshotScore">85</strong><small>/100 综合评分</small></div>
+                <div class="big-score"><strong id="snapshotScore">—</strong><small>/100 综合评分</small></div>
               </div>
             </div>
 
@@ -792,8 +776,8 @@
                 <div class="panel-head"><h3>Telegram 通知</h3><button class="link-btn" onclick="switchSectionById('notifications')">设置</button></div>
                 <table class="table">
                   <tbody>
-                    <tr><td>价格提醒</td><td id="telegramPriceStatus"><span class="status-pill green">正常运行</span></td><td>今日 09:00</td></tr>
-                    <tr><td>长期推荐日报</td><td id="telegramRecStatus"><span class="status-pill green">已推送</span></td><td>今日 08:30</td></tr>
+                    <tr><td>价格提醒</td><td id="telegramPriceStatus"><span class="status-pill orange">待读取</span></td><td>—</td></tr>
+                    <tr><td>长期推荐日报</td><td id="telegramRecStatus"><span class="status-pill orange">待读取</span></td><td>—</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -812,8 +796,8 @@
             <div class="form-row">
               <div class="field"><label>类型</label><select id="assetType"><option value="stock">股票</option><option value="crypto">加密货币</option><option value="metal">贵金属</option><option value="forex">外汇</option></select></div>
               <div class="field"><label>代码或关键词</label><input id="assetSearch" placeholder="AAPL / 600519.SS / BTCUSDT" /></div>
-              <div class="field"><label>间隔秒</label><input id="assetInterval" type="number" placeholder="900" /></div>
-              <div class="field"><label>阈值%</label><input id="assetThreshold" type="number" step="0.01" placeholder="0.1" /></div>
+              <div class="field"><label>间隔秒</label><input id="assetInterval" type="number" min="60" max="86400" placeholder="900" /></div>
+              <div class="field"><label>阈值%</label><input id="assetThreshold" type="number" min="0.01" max="100" step="0.01" placeholder="0.1" /></div>
               <button class="btn" onclick="addAsset()">加入候选池</button>
             </div>
           </div>
@@ -857,29 +841,35 @@
             <div class="panel">
               <div class="panel-head"><h2>因子与权重</h2></div>
               <div id="factorList"></div>
-              <div class="grid2" style="margin-top:14px;">
-                <div class="field"><label>因子 ID</label><input id="factorId" placeholder="capital-allocation" /></div>
-                <div class="field"><label>因子名称</label><input id="factorName" placeholder="资本配置能力" /></div>
-              </div>
-              <div class="field"><label>因子描述</label><textarea id="factorDescription" placeholder="说明这个因子为什么影响长期推荐"></textarea></div>
-              <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto;">
-                <div class="field"><label>权重</label><input id="factorWeight" type="number" step="0.01" value="1" min="0" /></div>
-                <div class="field"><label>排序</label><input id="factorSortOrder" type="number" value="100" /></div>
-                <div class="field"><label>启用</label><select id="factorEnabled"><option value="true">启用</option><option value="false">停用</option></select></div>
-                <button class="btn" onclick="saveFactor()">保存因子</button>
+              <div id="factorEditor">
+                <div class="grid2" style="margin-top:14px;">
+                  <div class="field"><label>因子 ID</label><input id="factorId" placeholder="capital-allocation" /></div>
+                  <div class="field"><label>因子名称</label><input id="factorName" placeholder="资本配置能力" /></div>
+                </div>
+                <div class="field"><label>因子描述</label><textarea id="factorDescription" placeholder="说明这个因子为什么影响长期推荐"></textarea></div>
+                <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto;">
+                  <div class="field"><label>权重</label><input id="factorWeight" type="number" step="0.01" value="1" min="0" /></div>
+                  <div class="field"><label>排序</label><input id="factorSortOrder" type="number" value="100" /></div>
+                  <div class="field"><label>启用</label><select id="factorEnabled"><option value="true">启用</option><option value="false">停用</option></select></div>
+                  <button class="btn" onclick="saveFactor()">保存因子</button>
+                </div>
               </div>
             </div>
             <div class="panel">
               <div class="panel-head"><h2>个股因子评分</h2></div>
-              <div class="form-row" style="grid-template-columns:1fr 1fr 1fr auto;">
+              <div class="form-row" style="grid-template-columns:1fr auto;">
                 <div class="field"><label>股票代码</label><input id="factorSymbol" placeholder="AAPL" /></div>
-                <div class="field"><label>因子</label><select id="stockFactorId"></select></div>
-                <div class="field"><label>评分</label><input id="stockFactorScore" type="number" value="60" min="0" max="100" /></div>
-                <button class="btn" onclick="saveStockFactorValue()">保存评分</button>
+                <button class="btn secondary" onclick="loadStockFactorValues()">读取该股票已填评分</button>
               </div>
-              <div class="field"><label>标签</label><input id="stockFactorLabel" placeholder="强 / 中性 / 承压" /></div>
-              <div class="field"><label>证据与说明</label><textarea id="stockFactorSummary" placeholder="写清楚打分依据，后续复盘会用它判断为什么对或错"></textarea></div>
-              <button class="btn secondary" onclick="loadStockFactorValues()">读取该股票已填评分</button>
+              <div id="stockFactorEditor">
+                <div class="form-row" style="grid-template-columns:1fr 1fr auto;">
+                  <div class="field"><label>因子</label><select id="stockFactorId"></select></div>
+                  <div class="field"><label>评分</label><input id="stockFactorScore" type="number" value="60" min="0" max="100" /></div>
+                  <button class="btn" onclick="saveStockFactorValue()">保存评分</button>
+                </div>
+                <div class="field"><label>标签</label><input id="stockFactorLabel" placeholder="强 / 中性 / 承压" /></div>
+                <div class="field"><label>证据与说明</label><textarea id="stockFactorSummary" placeholder="写清楚打分依据，后续复盘会用它判断为什么对或错"></textarea></div>
+              </div>
               <div id="stockFactorValueList" style="margin-top:14px;"></div>
             </div>
           </div>
@@ -907,7 +897,7 @@
             <div id="personalNotifications" class="grid2"></div>
           </div>
           <div class="grid2">
-            <div class="panel">
+            <div id="telegramGlobalPanel" class="panel">
               <div class="panel-head"><h2>Telegram 通知</h2></div>
               <div class="field"><label>启用</label><select id="telegramEnabled"><option value="true">启用</option><option value="false">关闭</option></select></div>
               <div class="field"><label>Bot Token</label><input id="telegramBotToken" type="password" placeholder="已配置时可留空" /></div>
@@ -923,7 +913,7 @@
               <table class="table">
                 <tbody>
                   <tr><td>价格提醒</td><td>按渠道订阅</td><td>实时监控阈值</td></tr>
-                  <tr><td>长期推荐日报</td><td id="dailyScheduleState">读取中</td><td>月度/季度/年度</td></tr>
+                  <tr><td>长期推荐日报</td><td id="dailyScheduleState">待读取</td><td>月度/季度/年度</td></tr>
                   <tr><td>Webhook</td><td><span class="status-pill orange">可选</span></td><td>钉钉/企微/自定义</td></tr>
                 </tbody>
               </table>
@@ -993,6 +983,10 @@
     let currentStockFactorValues = [];
     let currentHistoryItems = [];
     let cachedAssets = [];
+    let priceHistoryByAsset = new Map();
+    let priceHistoryLoading = false;
+    let assetLoadVersion = 0;
+    let chartAssetType = 'stock';
     let cachedRecommendations = { monthly: [], quarterly: [], yearly: [] };
 
     function iconSpark(color = '#2563eb') {
@@ -1103,6 +1097,17 @@
     function logout() {
       localStorage.removeItem('token');
       token = null;
+      currentUser = null;
+      assetLoadVersion++;
+      cachedAssets = [];
+      priceHistoryByAsset = new Map();
+      priceHistoryLoading = false;
+      currentFactors = [];
+      currentStockFactorValues = [];
+      currentHistoryItems = [];
+      cachedRecommendations = { monthly: [], quarterly: [], yearly: [] };
+      $('dashboardFactorRows').innerHTML = '<div class="empty">待读取</div>';
+      $('dashboardHistoryTable').innerHTML = '<div class="empty">待读取</div>';
       $('appPage').style.display = 'none';
       $('authPage').style.display = '';
     }
@@ -1117,7 +1122,9 @@
       $('appPage').style.display = '';
       updateUser();
       restoreResearchFilter();
-      await Promise.all([loadConfig(), loadAssets(), loadFactors(), loadRecommendations(), loadHistory(), loadPersonalNotifications()]);
+      const requests = [loadAssets(), loadFactors(), loadRecommendations(), loadHistory(), loadPersonalNotifications()];
+      if (currentUser.isAdmin) requests.push(loadConfig());
+      await Promise.all(requests);
     }
 
     function updateToday() {
@@ -1128,15 +1135,29 @@
       $('userEmail').textContent = currentUser.email;
       $('avatarInitial').textContent = (currentUser.email || '投').slice(0, 1).toUpperCase();
       if ($('planBadge')) $('planBadge').textContent = currentUser.plan === 'pro' ? 'Pro' : 'Free';
+      const isAdmin = Boolean(currentUser.isAdmin);
+      for (const id of ['settingsNav', 'settings', 'generateRunButton', 'factorEditor', 'stockFactorEditor', 'telegramGlobalPanel']) {
+        $(id).hidden = !isAdmin;
+      }
+      if (!isAdmin) {
+        $('dailyScheduleState').textContent = '仅管理员可查看';
+        $('telegramPriceStatus').innerHTML = '<span class="status-pill orange">状态未提供</span>';
+        $('telegramRecStatus').innerHTML = '<span class="status-pill orange">状态未提供</span>';
+      }
+      if (!isAdmin && $('settings').classList.contains('active')) switchSectionById('dashboard');
+      renderFactorList();
+      renderReviewWorkbench();
     }
 
     function switchSection(event, id) {
+      if (id === 'settings' && !currentUser?.isAdmin) return;
       document.querySelectorAll('.nav button').forEach(btn => btn.classList.remove('active'));
       if (event?.currentTarget) event.currentTarget.classList.add('active');
       showSection(id);
     }
 
     function switchSectionById(id) {
+      if (id === 'settings' && !currentUser?.isAdmin) return;
       const buttons = Array.from(document.querySelectorAll('.nav button'));
       const index = ['dashboard','watchlist','monitor','recommendations','factors','history','notifications','datasources','settings'].indexOf(id);
       buttons.forEach(btn => btn.classList.remove('active'));
@@ -1145,6 +1166,7 @@
     }
 
     function showSection(id) {
+      if (id === 'settings' && !currentUser?.isAdmin) return;
       document.querySelectorAll('.section').forEach(section => section.classList.remove('active'));
       $(id).classList.add('active');
     }
@@ -1159,8 +1181,10 @@
     }
 
     async function loadConfig() {
+      if (!currentUser?.isAdmin) return;
       try {
         const res = await fetch('/api/config', { headers: authHeaders() });
+        if (!res.ok) throw new Error('读取系统配置失败');
         const cfg = await res.json();
         $('interval').value = Math.round((cfg.interval || 900000) / 1000);
         $('threshold').value = cfg.threshold ?? 0.1;
@@ -1171,14 +1195,18 @@
         $('dailyScheduleState').textContent = cfg.recommendationEnabled ? '调度已启用' : '调度未启用';
         $('limitStat').textContent = cfg.recommendationLimit ?? 5;
         $('scoreStat').textContent = cfg.recommendationMinScore ?? 55;
-        $('telegramPriceStatus').innerHTML = cfg.telegramEnabled ? '<span class="status-pill green">正常运行</span>' : '<span class="status-pill orange">未启用</span>';
+        $('telegramPriceStatus').innerHTML = cfg.telegramEnabled ? '<span class="status-pill green">已启用</span>' : '<span class="status-pill orange">未启用</span>';
         $('telegramRecStatus').innerHTML = cfg.recommendationEnabled ? '<span class="status-pill green">已启用</span>' : '<span class="status-pill orange">未启用</span>';
       } catch {
         $('telegramStat').textContent = '未知';
+        $('dailyScheduleState').textContent = '状态未知';
+        $('telegramPriceStatus').innerHTML = '<span class="status-pill orange">状态未知</span>';
+        $('telegramRecStatus').innerHTML = '<span class="status-pill orange">状态未知</span>';
       }
     }
 
     async function saveConfig() {
+      if (!currentUser?.isAdmin) return;
       const body = {
         interval: Number($('interval').value) * 1000,
         threshold: Number($('threshold').value),
@@ -1197,23 +1225,120 @@
     }
 
     async function loadAssets() {
-      const res = await fetch('/api/assets', { headers: authHeaders() });
-      cachedAssets = await res.json();
-      $('assetCountStat').textContent = cachedAssets.length;
-      $('priceCountStat').textContent = cachedAssets.reduce((sum, item) => sum + (item.enabled ? 3 : 0), 0) || 11;
-      renderAssetTables();
-      if (currentUser) currentUser.assetCount = cachedAssets.length;
+      const version = ++assetLoadVersion;
+      priceHistoryLoading = true;
+      priceHistoryByAsset = new Map();
+      $('priceCountStat').textContent = '…';
+      $('priceCountNote').textContent = '正在读取历史记录';
+      if (cachedAssets.length) renderAssetTables();
+      else for (const id of ['dashboardAssetTable', 'assetList', 'monitorAssetList']) $(id).innerHTML = '<div class="empty">正在读取资产…</div>';
+      renderPriceChart();
+      try {
+        const res = await fetch('/api/assets', { headers: authHeaders() });
+        if (!res.ok) throw new Error('读取资产失败');
+        const assets = await res.json();
+        if (!Array.isArray(assets)) throw new Error('资产数据格式错误');
+        if (version !== assetLoadVersion) return;
+        cachedAssets = assets;
+        $('assetCountStat').textContent = cachedAssets.length;
+        if (currentUser) currentUser.assetCount = cachedAssets.length;
+        renderAssetTables();
+        const entries = await loadPriceEntries(cachedAssets, version);
+        if (version !== assetLoadVersion) return;
+        priceHistoryByAsset = new Map(entries);
+        priceHistoryLoading = false;
+        const count = entries.reduce((sum, [, item]) => sum + item.points.length, 0);
+        const failures = entries.filter(([, item]) => item.status === 'error').length;
+        $('priceCountStat').textContent = count;
+        $('priceCountNote').textContent = failures ? `${failures} 个资产读取失败` : count ? '按实际采集价格点统计' : '暂无数据';
+        renderAssetTables();
+        renderPriceChart();
+      } catch (error) {
+        if (version !== assetLoadVersion) return;
+        cachedAssets = [];
+        priceHistoryByAsset = new Map();
+        priceHistoryLoading = false;
+        $('assetCountStat').textContent = '—';
+        $('priceCountStat').textContent = '—';
+        $('priceCountNote').textContent = '读取失败';
+        const message = `<div class="empty">${escapeHtml(error.message || '读取资产失败')}</div>`;
+        $('dashboardAssetTable').innerHTML = message;
+        $('assetList').innerHTML = message;
+        $('monitorAssetList').innerHTML = message;
+        renderPriceChart();
+      }
+    }
+
+    async function loadPriceEntries(assets, version) {
+      const entries = new Array(assets.length);
+      let nextIndex = 0;
+      const worker = async () => {
+        while (version === assetLoadVersion && nextIndex < assets.length) {
+          const index = nextIndex++;
+          const asset = assets[index];
+          try {
+            const response = await fetch(`/api/prices/${encodeURIComponent(asset.id)}?hours=24`, { headers: authHeaders() });
+            if (!response.ok) throw new Error('读取价格失败');
+            const rows = await response.json();
+            if (!Array.isArray(rows)) throw new Error('价格数据格式错误');
+            entries[index] = [asset.id, { status: 'ok', points: normalizePriceHistory(rows) }];
+          } catch {
+            entries[index] = [asset.id, { status: 'error', points: [] }];
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, assets.length) }, () => worker()));
+      return entries;
+    }
+
+    function normalizePriceHistory(rows) {
+      const points = rows.map(row => ({ price: Number(row.price), timestamp: Number(row.timestamp) }))
+        .filter(point => Number.isFinite(point.price) && point.price > 0 && Number.isFinite(point.timestamp) && point.timestamp > 0)
+        .sort((a, b) => a.timestamp - b.timestamp);
+      return points.filter((point, index) => index === points.length - 1 || point.timestamp !== points[index + 1].timestamp);
+    }
+
+    function priceEntry(asset) {
+      return priceHistoryByAsset.get(asset.id);
+    }
+
+    function latestPriceHtml(asset) {
+      const entry = priceEntry(asset);
+      if (!entry) return priceHistoryLoading ? '读取中…' : '暂无数据';
+      if (entry.status === 'error') return '读取失败';
+      const latest = entry.points.at(-1);
+      if (!latest) return '暂无数据';
+      const value = latest.price < 0.0001
+        ? latest.price.toPrecision(6)
+        : latest.price.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 8 });
+      return `${value}<br><small>采集于 ${dateTime(latest.timestamp)}</small>`;
+    }
+
+    function priceChangeHtml(asset) {
+      const entry = priceEntry(asset);
+      if (!entry) return priceHistoryLoading ? '读取中…' : '暂无数据';
+      if (entry.status === 'error') return '读取失败';
+      if (entry.points.length < 2) return '暂无数据';
+      const first = entry.points[0];
+      const last = entry.points.at(-1);
+      const change = (last.price / first.price - 1) * 100;
+      if (!Number.isFinite(change)) return '暂无数据';
+      const color = change > 0 ? 'gain' : change < 0 ? 'loss' : '';
+      const span = `${dateTime(first.timestamp)} 至 ${dateTime(last.timestamp)}`;
+      return `<span class="${color}" title="${escapeHtml(span)}">${change > 0 ? '+' : ''}${change.toFixed(2)}%</span>`;
     }
 
     function renderAssetTables() {
-      const html = cachedAssets.length ? `<table class="table"><thead><tr><th>资产</th><th>类别</th><th>当前价格</th><th>日涨跌幅</th></tr></thead><tbody>${cachedAssets.slice(0, 6).map((a, index) => `
-        <tr><td><span class="dot" style="background:${assetColor(index)}"></span><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${assetTypeLabel(a.type)}</td><td>${mockPrice(a, index)}</td><td class="${index % 5 === 3 ? 'loss' : 'gain'}">${index % 5 === 3 ? '-0.18%' : '+' + (0.41 + index * 0.21).toFixed(2) + '%'}</td></tr>
+      const html = cachedAssets.length ? `<table class="table"><thead><tr><th>资产</th><th>类别</th><th>最近记录价格</th><th title="近 24 小时内首末两条监控记录的变化">区间变化</th></tr></thead><tbody>${cachedAssets.slice(0, 6).map((a, index) => `
+        <tr><td><span class="dot" style="background:${assetColor(index)}"></span><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${escapeHtml(assetTypeLabel(a.type))}</td><td>${latestPriceHtml(a)}</td><td>${priceChangeHtml(a)}</td></tr>
       `).join('')}</tbody></table>` : '<div class="empty">还没有候选资产。</div>';
       $('dashboardAssetTable').innerHTML = html;
       $('assetList').innerHTML = cachedAssets.length ? `<table class="table"><thead><tr><th>资产</th><th>类型</th><th>参数</th><th></th></tr></thead><tbody>${cachedAssets.map(a => `
-        <tr><td><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${assetTypeLabel(a.type)}</td><td>间隔 ${a.interval ? a.interval / 1000 : '全局'} 秒<br><small>阈值 ${a.threshold ?? '全局'}%</small></td><td><button class="btn danger small" onclick="removeAsset('${encodeURIComponent(a.id)}')">删除</button></td></tr>
+        <tr><td><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${escapeHtml(assetTypeLabel(a.type))}</td><td>间隔 ${a.interval ? a.interval / 1000 : '全局'} 秒<br><small>阈值 ${a.threshold ?? '全局'}%</small></td><td><button class="btn danger small" onclick="removeAsset('${encodeURIComponent(a.id)}')">删除</button></td></tr>
       `).join('')}</tbody></table>` : '<div class="empty">还没有候选资产。</div>';
-      $('monitorAssetList').innerHTML = $('assetList').innerHTML;
+      $('monitorAssetList').innerHTML = cachedAssets.length ? `<table class="table"><thead><tr><th>资产</th><th>类别</th><th>最近记录价格</th><th title="近 24 小时内首末两条监控记录的变化">区间变化</th><th>近 24 小时价格点</th><th>状态</th></tr></thead><tbody>${cachedAssets.map(a => `
+        <tr><td><b>${escapeHtml(a.name)}</b><br><small>${escapeHtml(a.symbol)}</small></td><td>${escapeHtml(assetTypeLabel(a.type))}</td><td>${latestPriceHtml(a)}</td><td>${priceChangeHtml(a)}</td><td>${priceHistoryLoading ? '读取中…' : priceEntry(a)?.status === 'error' ? '读取失败' : priceEntry(a)?.points.length ?? 0}</td><td>${a.enabled ? '已启用' : '已停用'}</td></tr>
+      `).join('')}</tbody></table>` : '<div class="empty">还没有监控资产。</div>';
     }
 
     function assetColor(index) {
@@ -1224,11 +1349,43 @@
       return ({ stock: '股票', crypto: '加密货币', metal: '贵金属', forex: '外汇' })[type] || type;
     }
 
-    function mockPrice(asset, index) {
-      if (asset.type === 'crypto') return index === 0 ? '68,542.10' : '3,740.20';
-      if (asset.type === 'metal') return '2,350.48';
-      if (asset.type === 'forex') return '104.25';
-      return ['1,640.12', '367.40', '185.80', '245.20'][index % 4];
+    function setPriceChartType(type) {
+      if (!['stock', 'crypto', 'metal', 'forex'].includes(type)) return;
+      chartAssetType = type;
+      document.querySelectorAll('[data-price-type]').forEach(button => button.classList.toggle('active', button.dataset.priceType === type));
+      renderPriceChart();
+    }
+
+    function renderPriceChart() {
+      const legend = $('priceChartLegend');
+      const body = $('priceChartBody');
+      legend.replaceChildren();
+      if (priceHistoryLoading) {
+        body.innerHTML = '<div class="empty">正在读取历史价格…</div>';
+        return;
+      }
+      const series = cachedAssets.map((asset, index) => ({ asset, color: assetColor(index), points: priceEntry(asset)?.points || [] }))
+        .filter(item => item.asset.type === chartAssetType && item.points.length >= 2).slice(0, 4);
+      if (!series.length) {
+        body.innerHTML = '<div class="empty">暂无数据：至少需要两条近 24 小时监控记录。</div>';
+        return;
+      }
+      legend.innerHTML = series.map(item => `<span><i style="background:${item.color}"></i>${escapeHtml(item.asset.name || item.asset.symbol)}</span>`).join('');
+      const now = Date.now() / 1000;
+      const from = now - 24 * 60 * 60;
+      const maxMove = Math.max(1, ...series.flatMap(item => item.points.map(point => Math.abs((point.price / item.points[0].price - 1) * 100))));
+      const tick = maxMove.toFixed(maxMove < 10 ? 1 : 0);
+      const paths = series.map(item => {
+        const firstPrice = item.points[0].price;
+        const coordinates = item.points.map(point => {
+          const x = 32 + Math.max(0, Math.min(1, (point.timestamp - from) / (24 * 60 * 60))) * 428;
+          const change = (point.price / firstPrice - 1) * 100;
+          const y = 95 - change / maxMove * 65;
+          return `${x.toFixed(1)} ${y.toFixed(1)}`;
+        });
+        return `<path d="M${coordinates.join(' L')}" fill="none" stroke="${item.color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+      }).join('');
+      body.innerHTML = `<svg viewBox="0 0 480 190" role="img" aria-label="近 24 小时监控价格相对变化走势图"><g stroke="#e6edf7" stroke-width="1"><path d="M32 30H460M32 95H460M32 160H460"/></g><g fill="#667085" font-size="11"><text x="2" y="34">+${tick}%</text><text x="13" y="99">0%</text><text x="2" y="164">-${tick}%</text><text x="32" y="182">24 小时前</text><text x="434" y="182">现在</text></g>${paths}</svg>`;
     }
 
     async function addAsset() {
@@ -1270,18 +1427,20 @@
         $('researchLoadedAt').textContent = data.run ? '推荐快照：' + dateTime(data.run.generatedAt) + ' · 来源 ' + data.run.source + (Date.now() / 1000 - data.run.generatedAt > 86400 ? ' · 超过 24 小时，待更新' : '') : '尚未保存推荐快照';
         $('dashboardSnapshotDate').textContent = $('researchLoadedAt').textContent;
         const top = Object.values(cachedRecommendations).flat()[0];
-        if (top) $('snapshotScore').textContent = top.score;
+        $('snapshotScore').textContent = top ? top.score : '—';
       } catch (e) {
         cachedRecommendations = { monthly: [], quarterly: [], yearly: [] };
         researchSelections.clear();
         renderResearchWorkbench();
         $('researchLoadedAt').textContent = '推荐数据未就绪';
         $('dashboardSnapshotDate').textContent = '推荐数据未就绪';
+        $('snapshotScore').textContent = '—';
         targets.forEach(el => el.innerHTML = `<div class="empty">推荐加载失败：${escapeHtml(e.message)}</div>`);
       }
     }
 
     async function generateSavedRun() {
+      if (!currentUser?.isAdmin) return;
       const button = $('generateRunButton');
       if (button.disabled) return;
       button.disabled = true;
@@ -1352,8 +1511,8 @@
     }
 
     function renderFactorList() {
-      $('factorList').innerHTML = currentFactors.length ? `<table class="table"><thead><tr><th>因子</th><th>权重</th><th>状态</th><th></th></tr></thead><tbody>${currentFactors.map((f, i) => `
-        <tr><td><b>${escapeHtml(f.name)}</b><br><small>${escapeHtml(f.id)} · ${escapeHtml(f.description)}</small></td><td>${Number(f.weight).toFixed(2)}</td><td><span class="status-pill ${f.enabled ? 'green' : 'orange'}">${f.enabled ? '已启用' : '已停用'}</span></td><td><button class="btn secondary small" onclick="fillFactor(${i})">编辑</button></td></tr>
+      $('factorList').innerHTML = currentFactors.length ? `<table class="table"><thead><tr><th>因子</th><th>权重</th><th>状态</th>${currentUser?.isAdmin ? '<th>操作</th>' : ''}</tr></thead><tbody>${currentFactors.map((f, i) => `
+        <tr><td><b>${escapeHtml(f.name)}</b><br><small>${escapeHtml(f.id)} · ${escapeHtml(f.description)}</small></td><td>${Number(f.weight).toFixed(2)}</td><td><span class="status-pill ${f.enabled ? 'green' : 'orange'}">${f.enabled ? '已启用' : '已停用'}</span></td>${currentUser?.isAdmin ? `<td><button class="btn secondary small" onclick="fillFactor(${i})">编辑</button></td>` : ''}</tr>
       `).join('')}</tbody></table>` : '<div class="empty">还没有推荐因子。</div>';
     }
 
@@ -1366,6 +1525,7 @@
     }
 
     function fillFactor(index) {
+      if (!currentUser?.isAdmin) return;
       const f = currentFactors[index];
       if (!f) return;
       $('factorId').value = f.id;
@@ -1377,6 +1537,7 @@
     }
 
     async function saveFactor() {
+      if (!currentUser?.isAdmin) return;
       const body = {
         id: $('factorId').value,
         name: $('factorName').value,
@@ -1398,8 +1559,8 @@
       const data = await res.json();
       if (!data.success) return $('stockFactorValueList').innerHTML = `<div class="empty">${escapeHtml(data.message)}</div>`;
       currentStockFactorValues = data.values || [];
-      $('stockFactorValueList').innerHTML = currentStockFactorValues.length ? `<table class="table"><thead><tr><th>因子</th><th>评分</th><th>说明</th><th></th></tr></thead><tbody>${currentStockFactorValues.map((v, i) => `
-        <tr><td>${escapeHtml(factorName(v.factorId))}<br><small>${escapeHtml(v.factorId)}</small></td><td><b>${v.score}</b><br><small>${escapeHtml(v.label)}</small></td><td>${escapeHtml(v.summary)}</td><td><button class="btn secondary small" onclick="fillStockFactorValue(${i})">编辑</button></td></tr>
+      $('stockFactorValueList').innerHTML = currentStockFactorValues.length ? `<table class="table"><thead><tr><th>因子</th><th>评分</th><th>说明</th>${currentUser?.isAdmin ? '<th>操作</th>' : ''}</tr></thead><tbody>${currentStockFactorValues.map((v, i) => `
+        <tr><td>${escapeHtml(factorName(v.factorId))}<br><small>${escapeHtml(v.factorId)}</small></td><td><b>${v.score}</b><br><small>${escapeHtml(v.label)}</small></td><td>${escapeHtml(v.summary)}</td>${currentUser?.isAdmin ? `<td><button class="btn secondary small" onclick="fillStockFactorValue(${i})">编辑</button></td>` : ''}</tr>
       `).join('')}</tbody></table>` : '<div class="empty">该股票还没有自定义因子评分。</div>';
     }
 
@@ -1408,6 +1569,7 @@
     }
 
     function fillStockFactorValue(index) {
+      if (!currentUser?.isAdmin) return;
       const v = currentStockFactorValues[index];
       if (!v) return;
       $('factorSymbol').value = v.symbol;
@@ -1418,6 +1580,7 @@
     }
 
     async function saveStockFactorValue() {
+      if (!currentUser?.isAdmin) return;
       const body = {
         symbol: $('factorSymbol').value,
         factorId: $('stockFactorId').value,
@@ -1456,11 +1619,19 @@
     }
 
     function renderHistoryTable(items, compact = false) {
-      if (!items.length) return '<div class="empty">还没有推荐历史。点击“生成并保存”先创建快照。</div>';
+      if (!items.length) return `<div class="empty">${currentUser?.isAdmin ? '还没有推荐历史。点击“生成并保存”先创建快照。' : '还没有推荐历史。'}</div>`;
       if (compact) return renderCompactHistory(items);
       return `<table class="table"><thead><tr><th>时间</th><th>阶段</th><th>股票</th><th>评分</th><th>因子快照</th><th>复盘</th></tr></thead><tbody>${items.map(item => { const i = currentHistoryItems.indexOf(item); return `
-        <tr><td>${dateTime(item.generatedAt)}<br><small>${escapeHtml(item.source)}</small></td><td><span class="status-pill blue">${horizonLabel(item.horizon)}</span></td><td><b>${escapeHtml(item.symbol)}</b><br><small>${escapeHtml(item.name)}</small></td><td><b>${item.score}</b><br><span class="status-pill ${actionClass(item.action)}">${actionText[item.action] || item.action}</span></td><td>${renderHistoryFactors(item.factorContributions || [])}</td><td><div class="review-box"><div class="review-row"><select id="reviewOutcome${i}"><option value="pending" ${item.reviewOutcome === 'pending' || !item.reviewOutcome ? 'selected' : ''}>待复盘</option><option value="accurate" ${item.reviewOutcome === 'accurate' ? 'selected' : ''}>准确</option><option value="mixed" ${item.reviewOutcome === 'mixed' ? 'selected' : ''}>部分准确</option><option value="inaccurate" ${item.reviewOutcome === 'inaccurate' ? 'selected' : ''}>不准确</option></select><input id="reviewReturn${i}" type="number" step="0.01" placeholder="实际收益%" value="${item.actualReturn ?? ''}" /><button class="btn secondary small" onclick="saveReview(${i})">保存</button></div><textarea id="reviewReason${i}" placeholder="为什么准确或不准确">${escapeHtml(item.reviewReason || '')}</textarea></div></td></tr>
+        <tr><td>${dateTime(item.generatedAt)}<br><small>${escapeHtml(item.source)}</small></td><td><span class="status-pill blue">${horizonLabel(item.horizon)}</span></td><td><b>${escapeHtml(item.symbol)}</b><br><small>${escapeHtml(item.name)}</small></td><td><b>${item.score}</b><br><span class="status-pill ${actionClass(item.action)}">${actionText[item.action] || item.action}</span></td><td>${renderHistoryFactors(item.factorContributions || [])}</td><td>${renderReviewCell(item, i)}</td></tr>
       `; }).join('')}</tbody></table>`;
+    }
+
+    function renderReviewCell(item, index) {
+      if (!currentUser?.isAdmin) {
+        const actualReturn = item.actualReturn === undefined || item.actualReturn === null ? '暂无数据' : `${escapeHtml(item.actualReturn)}%`;
+        return `${reviewPill(item.reviewOutcome)}<br><small>实际收益：${actualReturn}</small><br><small>${escapeHtml(item.reviewReason || '暂无复盘原因')}</small>`;
+      }
+      return `<div class="review-box"><div class="review-row"><select id="reviewOutcome${index}"><option value="pending" ${item.reviewOutcome === 'pending' || !item.reviewOutcome ? 'selected' : ''}>待复盘</option><option value="accurate" ${item.reviewOutcome === 'accurate' ? 'selected' : ''}>准确</option><option value="mixed" ${item.reviewOutcome === 'mixed' ? 'selected' : ''}>部分准确</option><option value="inaccurate" ${item.reviewOutcome === 'inaccurate' ? 'selected' : ''}>不准确</option></select><input id="reviewReturn${index}" type="number" step="0.01" placeholder="实际收益%" value="${item.actualReturn ?? ''}" /><button class="btn secondary small" onclick="saveReview(${index})">保存</button></div><textarea id="reviewReason${index}" placeholder="为什么准确或不准确">${escapeHtml(item.reviewReason || '')}</textarea></div>`;
     }
 
     function renderHistoryFactors(items) {
@@ -1495,6 +1666,7 @@
     }
 
     async function saveReview(index) {
+      if (!currentUser?.isAdmin) return;
       const item = currentHistoryItems[index];
       if (!item) return;
       const actualReturnInput = $(`reviewReturn${index}`).value;
@@ -1513,6 +1685,7 @@
     }
 
     async function testTelegram() {
+      if (!currentUser?.isAdmin) return;
       const botToken = $('telegramBotToken').value;
       const chatId = $('telegramChatId').value;
       if (!botToken || !chatId) return toast('测试需要填写 Bot Token 和 Chat ID', 'error');

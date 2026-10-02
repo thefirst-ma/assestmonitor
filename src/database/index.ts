@@ -310,11 +310,21 @@ export class AssetDatabase {
 
   private backend: DatabaseBackend = databaseConfig.driver === 'mysql' ? new MySqlBackend() : new SqlJsBackend();
   private initialized = false;
+  private initPromise?: Promise<void>;
 
   async init(): Promise<void> {
     if (this.initialized) return;
-    await this.backend.init();
-    this.initialized = true;
+    if (!this.initPromise) {
+      this.initPromise = this.backend.init()
+        .then(() => { this.initialized = true; })
+        .catch(error => { this.initPromise = undefined; throw error; });
+    }
+    await this.initPromise;
+  }
+
+  async healthCheck(): Promise<void> {
+    await this.init();
+    await this.backend.exec('SELECT 1');
   }
 
   get isMysql(): boolean {
@@ -394,9 +404,24 @@ export class AssetDatabase {
     );
   }
 
+  async updateAssetForUser(id: string, userId: string, interval?: number, threshold?: number): Promise<void> {
+    await this.init();
+    await this.backend.run(
+      this.isMysql
+        ? 'UPDATE assets SET interval_ms = ?, threshold = ? WHERE id = ? AND user_id = ? AND enabled = 1'
+        : 'UPDATE assets SET interval = ?, threshold = ? WHERE id = ? AND user_id = ? AND enabled = 1',
+      [interval ?? null, threshold ?? null, id, userId]
+    );
+  }
+
   async removeAsset(id: string): Promise<void> {
     await this.init();
     await this.backend.run('UPDATE assets SET enabled = 0 WHERE id = ?', [id]);
+  }
+
+  async removeAssetForUser(id: string, userId: string): Promise<void> {
+    await this.init();
+    await this.backend.run('UPDATE assets SET enabled = 0 WHERE id = ? AND user_id = ? AND enabled = 1', [id, userId]);
   }
 
   async getEnabledAssets(): Promise<Asset[]> {
@@ -438,6 +463,17 @@ export class AssetDatabase {
   async getHistoricalPrices(assetId: string, fromTimestamp: number): Promise<PriceData[]> {
     await this.init();
     const rows = await this.queryRows<any>('SELECT asset_id, price, timestamp FROM prices WHERE asset_id = ? AND timestamp >= ? ORDER BY timestamp ASC', [assetId, fromTimestamp]);
+    return rows.map(row => this.rowToPrice(row));
+  }
+
+  async getHistoricalPricesForUser(assetId: string, userId: string, fromTimestamp: number): Promise<PriceData[]> {
+    await this.init();
+    const rows = await this.queryRows<any>(`
+      SELECT p.asset_id, p.price, p.timestamp
+      FROM prices p JOIN assets a ON a.id = p.asset_id
+      WHERE p.asset_id = ? AND a.user_id = ? AND a.enabled = 1 AND p.timestamp >= ?
+      ORDER BY p.timestamp ASC
+    `, [assetId, userId, fromTimestamp]);
     return rows.map(row => this.rowToPrice(row));
   }
 

@@ -11,6 +11,7 @@ test('registration and per-user notifications', async () => {
   process.env.DATABASE_PATH = join(dir, 'test.db');
   process.env.NOTIFICATION_ENCRYPTION_KEY = 'ab'.repeat(32);
   process.env.JWT_SECRET = 'integration-test-only';
+  process.env.RECOMMENDATION_STOCK_POOL = 'TEST';
   const { app } = await import('../src/server');
   const { database } = await import('../src/database');
   const { notifyUser, notifyReportSubscribers } = await import('../src/services/user-notifications');

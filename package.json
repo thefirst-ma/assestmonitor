@@ -5,13 +5,18 @@
   "main": "dist/index.js",
   "scripts": {
     "test:research": "node --test tests/research-tools.test.cjs",
+    "test:security": "tsx --test tests/admin-access.test.ts tests/asset-ownership.test.ts",
+    "test:privacy": "tsx --test tests/recommendation-privacy.test.ts",
+    "test:assets": "tsx --test tests/asset-ownership.test.ts",
     "test:notifications": "tsx --test tests/notifications.test.ts",
+    "test:monitor": "tsx --test tests/monitor-worker.test.ts",
     "db:notifications": "node sql/setup-notifications.cjs",
     "dev": "tsx watch src/server.ts",
     "dev:cli": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "start:cli": "node dist/index.js",
+    "start:worker": "node dist/worker.js",
     "db:migrate:sqljs-to-mysql": "tsx src/scripts/migrate-sqljs-to-mysql.ts"
   },
   "keywords": [
@@ -28,21 +33,23 @@
     "express": "^4.18.0",
     "jsonwebtoken": "^9.0.3",
     "mysql2": "^3.23.1",
-    "node-telegram-bot-api": "^0.66.0",
-    "nodemailer": "^6.9.0",
+    "node-telegram-bot-api": "^1.2.0",
+    "nodemailer": "^10.0.13",
     "qrcode": "^1.5.3",
     "sql.js": "^1.10.3",
-    "stripe": "^20.4.1"
+    "stripe": "^20.4.1",
+    "undici": "^6.29.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
     "@types/express": "^4.17.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.0",
-    "@types/node-telegram-bot-api": "^0.64.0",
-    "@types/nodemailer": "^6.4.14",
     "@types/qrcode": "^1.5.0",
-    "tsx": "^4.7.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.3.0"
   }
 }

@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import axios from 'axios';
 import TelegramBot from 'node-telegram-bot-api';
+import { ProxyAgent } from 'undici';
 import { PriceAlert, NotificationConfig } from '../types';
 
 export class NotificationService {
@@ -17,7 +18,9 @@ export class NotificationService {
 
         if (this.config.telegram.proxyHost && this.config.telegram.proxyPort) {
           botOptions.request = {
-            proxy: `http://${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`
+            fetchOptions: {
+              dispatcher: new ProxyAgent(`http://${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`)
+            }
           };
           console.log(`📡 Telegram 使用代理: ${this.config.telegram.proxyHost}:${this.config.telegram.proxyPort}`);
         }

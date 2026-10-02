@@ -10,7 +10,9 @@ import {
   FactorContribution,
   RecommendationAction,
   RecommendationConfig,
+  RecommendationHistoryItem,
   RecommendationHorizon,
+  RecommendationRun,
   ResearchProfile,
   StagedRecommendations,
   StockRecommendation,
@@ -218,28 +220,44 @@ async function mapWithConcurrency<T, R>(
 export class RecommendationService {
   constructor(private readonly cfg: RecommendationConfig = recommendationConfig) {}
 
+  isPublicStockSymbol(symbol: string): boolean {
+    const normalized = symbol.trim().toUpperCase();
+    return this.cfg.stockPool.some(item => item.toUpperCase() === normalized);
+  }
+
+  filterPublicSnapshot(snapshot: { run: RecommendationRun | null; recommendations: StagedRecommendations }): {
+    run: RecommendationRun | null;
+    recommendations: StagedRecommendations;
+  } {
+    const recommendations = {} as StagedRecommendations;
+    for (const horizon of horizons) {
+      recommendations[horizon] = snapshot.recommendations[horizon]
+        .filter(item => this.isPublicStockSymbol(item.symbol) && !item.reasons?.includes('基于本地长期监控数据'))
+        .map(item => ({ ...item, name: item.symbol }));
+    }
+    return { run: snapshot.run, recommendations };
+  }
+
+  filterPublicHistory(history: RecommendationHistoryItem[]): RecommendationHistoryItem[] {
+    return history
+      .filter(item => this.isPublicStockSymbol(item.symbol))
+      .map(item => ({ ...item, name: item.symbol }));
+  }
+
   async generateDailyRecommendations(): Promise<StockRecommendation[]> {
     const staged = await this.generateStagedRecommendations();
     return staged.yearly;
   }
 
   async generateStagedRecommendations(): Promise<StagedRecommendations> {
-    const settled = await mapWithConcurrency(this.cfg.stockPool, 5, symbol => this.scoreSymbol(symbol));
+    const symbols = Array.from(new Set(this.cfg.stockPool.map(symbol => symbol.toUpperCase())));
+    const settled = await mapWithConcurrency(symbols, 5, symbol => this.scoreSymbol(symbol));
 
-    const allOnlineCandidates = settled
+    const candidates = settled
       .filter((result): result is PromiseFulfilledResult<ScoredCandidate> => result.status === 'fulfilled')
       .map(result => result.value)
       .sort((a, b) => b.rawScore - a.rawScore);
-
-    const allLocalCandidates = await this.generateLocalRecommendations();
-
-    const merged = new Map<string, ScoredCandidate>();
-    for (const item of [...allOnlineCandidates, ...allLocalCandidates]) {
-      const previous = merged.get(item.recommendation.symbol);
-      if (!previous || item.rawScore > previous.rawScore) merged.set(item.recommendation.symbol, item);
-    }
-
-    const base = Array.from(merged.values()).map(item => item.recommendation);
+    const base = candidates.map(item => item.recommendation);
 
     return horizons.reduce((acc, horizon) => {
       acc[horizon] = base
@@ -266,18 +284,12 @@ export class RecommendationService {
   }
 
   async getDataReadiness(): Promise<DataReadiness[]> {
-    const assets = (await database.getEnabledAssets()).filter(asset => asset.type === 'stock');
-    const assetsBySymbol = new Map(assets.map(asset => [asset.symbol.toUpperCase(), asset]));
-    const symbols = Array.from(new Set([
-      ...this.cfg.stockPool.map(symbol => symbol.toUpperCase()),
-      ...assets.map(asset => asset.symbol.toUpperCase())
-    ])).sort();
+    const symbols = Array.from(new Set(this.cfg.stockPool.map(symbol => symbol.toUpperCase()))).sort();
 
     const rows: DataReadiness[] = [];
     for (const symbol of symbols) {
-      const asset = assetsBySymbol.get(symbol);
-      const isBuiltInPool = this.cfg.stockPool.map(item => item.toUpperCase()).includes(symbol);
-      const pricePoints = asset ? (await database.getLastNPrices(asset.id, 260)).length : isBuiltInPool ? 260 : 0;
+      // Public market history is not persisted; zero means it has not been measured here.
+      const pricePoints = 0;
       const savedProfile = await database.getResearchProfile(symbol);
       const builtInProfile = researchProfiles[symbol];
       const profile = savedProfile || builtInProfile;
@@ -286,7 +298,7 @@ export class RecommendationService {
       const hasIndustryTrend = !!profile?.industryTrend?.summary;
       const hasPolicyImpact = !!profile?.policyImpact?.summary;
       const missing: string[] = [];
-      if (pricePoints < 80) missing.push('长期价格数据不足');
+      if (pricePoints < 80) missing.push('公开市场历史未核验');
       if (!hasMoat) missing.push('护城河档案缺失');
       if (!hasLeadership) missing.push('负责人档案缺失');
       if (!hasIndustryTrend) missing.push('行业趋势档案缺失');
@@ -301,7 +313,7 @@ export class RecommendationService {
 
       rows.push({
         symbol,
-        name: asset?.name || symbol,
+        name: symbol,
         pricePoints,
         hasResearchProfile: !!profile,
         hasMoat,
@@ -323,6 +335,7 @@ export class RecommendationService {
     history: Awaited<ReturnType<typeof database.getRecommendationHistoryBySymbol>>;
   }> {
     const normalized = symbol.toUpperCase();
+    if (!this.isPublicStockSymbol(normalized)) throw new Error('股票不在公开候选池中');
     const staged = await this.generateStagedRecommendations();
     const recommendations: Partial<StagedRecommendations> = {};
     for (const horizon of horizons) {
@@ -334,7 +347,7 @@ export class RecommendationService {
       recommendations,
       readiness: (await this.getDataReadiness()).find(item => item.symbol === normalized),
       researchProfile: await database.getResearchProfile(normalized),
-      history: await database.getRecommendationHistoryBySymbol(normalized)
+      history: this.filterPublicHistory(await database.getRecommendationHistoryBySymbol(normalized))
     };
   }
 
@@ -593,40 +606,6 @@ export class RecommendationService {
     });
 
     return { rawScore, recommendation };
-  }
-
-  private async generateLocalRecommendations(): Promise<ScoredCandidate[]> {
-    try {
-      return (await Promise.all((await database.getEnabledAssets())
-        .filter(asset => asset.type === 'stock')
-        .map(async (asset): Promise<ScoredCandidate | undefined> => {
-          const prices = (await database.getLastNPrices(asset.id, 260))
-            .map(price => ({ close: price.price, timestamp: price.timestamp }))
-            .filter(point => Number.isFinite(point.close) && point.close > 0);
-
-          if (prices.length < 30) return undefined;
-
-          const metrics = this.buildMetrics(undefined, prices);
-          const { rawScore, reasons, risks } = this.scoreMetrics(metrics);
-          reasons.unshift('基于本地长期监控数据');
-
-          return {
-            rawScore,
-            recommendation: await this.createRecommendation({
-              symbol: asset.symbol,
-              name: asset.name,
-              rawScore,
-              price: prices[prices.length - 1].close,
-              reasons,
-              risks,
-              metrics
-            })
-          };
-        })))
-        .filter((item): item is ScoredCandidate => item !== undefined);
-    } catch {
-      return [];
-    }
   }
 
   private async fetchQuoteSummary(symbol: string): Promise<YahooQuoteSummary | undefined> {

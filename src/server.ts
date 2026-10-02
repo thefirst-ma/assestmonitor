@@ -78,7 +78,56 @@ function authMiddleware(req: AuthRequest, res: Response, next: NextFunction): vo
   }
 }
 
+function isAdminEmail(email: string): boolean {
+  const configured = process.env.ADMIN_EMAILS || process.env.ADMIN_EMAIL || '';
+  return configured.split(/[,;\s]+/).some(value => value && value.toLowerCase() === email.toLowerCase());
+}
+
+function assetSettings(body: any): { interval?: number; threshold?: number } {
+  const interval = body?.interval;
+  const threshold = body?.threshold;
+  let intervalMs: number | undefined;
+  let thresholdPercent: number | undefined;
+  if (interval !== undefined && interval !== null && interval !== '') {
+    const seconds = Number(interval);
+    if (!Number.isFinite(seconds) || seconds < 60 || seconds > 86400) {
+      throw new Error('监控间隔须在 60 秒到 24 小时之间');
+    }
+    intervalMs = Math.round(seconds * 1000);
+  }
+  if (threshold !== undefined && threshold !== null && threshold !== '') {
+    thresholdPercent = Number(threshold);
+    if (!Number.isFinite(thresholdPercent) || thresholdPercent <= 0 || thresholdPercent > 100) {
+      throw new Error('涨跌阈值须大于 0 且不超过 100%');
+    }
+  }
+  return { interval: intervalMs, threshold: thresholdPercent };
+}
+
+async function adminMiddleware(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const user = await database.getUserById(req.userId!);
+    if (!user || !isAdminEmail(user.email)) {
+      res.status(403).json({ success: false, message: '需要管理员权限' });
+      return;
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
+
 // ---- Public routes ----
+
+app.get('/api/health', async (_req: Request, res: Response) => {
+  try {
+    await database.healthCheck();
+    res.json({ status: 'ok' });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(503).json({ status: 'unavailable' });
+  }
+});
 
 app.get('/api/cron/recommendations', async (req: Request, res: Response) => {
   const secret = process.env.CRON_SECRET;
@@ -202,6 +251,7 @@ app.get('/api/auth/me', authMiddleware, async (req: AuthRequest, res: Response) 
     id: user.id,
     email: user.email,
     plan: user.plan,
+    isAdmin: isAdminEmail(user.email),
     assetCount,
     assetLimit: limit,
     stripeConfigured: stripeService.isConfigured()
@@ -212,8 +262,17 @@ app.get('/api/auth/me', authMiddleware, async (req: AuthRequest, res: Response) 
 app.get('/api/search/:type', async (req: Request, res: Response) => {
   try {
     const type = req.params.type as AssetType;
-    const query = req.query.q as string || '';
+    if (!['crypto', 'stock', 'metal', 'forex'].includes(type)) {
+      res.status(400).json({ success: false, message: '不支持的资产类型' });
+      return;
+    }
+    const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    if (query.length > 64) {
+      res.status(400).json({ success: false, message: '搜索词不能超过 64 个字符' });
+      return;
+    }
     const results = await priceService.searchSymbols(type, query);
+    res.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
     res.json(results);
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
@@ -243,9 +302,9 @@ app.post('/api/assets', authMiddleware, async (req: AuthRequest, res: Response) 
       return;
     }
 
-    const { type, symbol, name, interval, threshold } = req.body;
-    const assetInterval = interval ? interval * 1000 : undefined;
-    await monitor.addAsset(type as AssetType, symbol.toUpperCase(), name, req.userId!, assetInterval, threshold);
+    const { type, symbol, name } = req.body;
+    const settings = assetSettings(req.body);
+    await monitor.addAsset(type as AssetType, symbol.toUpperCase(), name, req.userId!, settings.interval, settings.threshold);
     res.json({ success: true, message: `已添加监控: ${name || symbol}` });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -254,9 +313,10 @@ app.post('/api/assets', authMiddleware, async (req: AuthRequest, res: Response) 
 
 app.put('/api/assets/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    const { interval, threshold } = req.body;
-    const assetInterval = interval ? interval * 1000 : undefined;
-    await monitor.updateAsset(req.params.id, assetInterval, threshold);
+    const asset = await database.getAssetByIdForUser(req.params.id, req.userId!);
+    if (!asset) { res.status(404).json({ success: false, message: '资产不存在' }); return; }
+    const settings = assetSettings(req.body);
+    await monitor.updateAssetForUser(asset.id, req.userId!, settings.interval, settings.threshold);
     res.json({ success: true, message: '资产设置已更新' });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -265,7 +325,9 @@ app.put('/api/assets/:id', authMiddleware, async (req: AuthRequest, res: Respons
 
 app.delete('/api/assets/:id', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    await monitor.removeAsset(req.params.id);
+    const asset = await database.getAssetByIdForUser(req.params.id, req.userId!);
+    if (!asset) { res.status(404).json({ success: false, message: '资产不存在' }); return; }
+    await monitor.removeAssetForUser(asset.id, req.userId!);
     res.json({ success: true, message: `已移除监控: ${req.params.id}` });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -273,10 +335,19 @@ app.delete('/api/assets/:id', authMiddleware, async (req: AuthRequest, res: Resp
 });
 
 app.get('/api/prices/:assetId', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const hours = parseInt(req.query.hours as string) || 24;
-  const fromTimestamp = Math.floor(Date.now() / 1000) - (hours * 60 * 60);
-  const prices = await database.getHistoricalPrices(req.params.assetId, fromTimestamp);
-  res.json(prices);
+  try {
+    const asset = await database.getAssetByIdForUser(req.params.assetId, req.userId!);
+    if (!asset) { res.status(404).json({ success: false, message: '资产不存在' }); return; }
+    const requestedHours = Number(req.query.hours);
+    const hours = Number.isFinite(requestedHours) && requestedHours > 0
+      ? Math.min(Math.floor(requestedHours), 720)
+      : 24;
+    const fromTimestamp = Math.floor(Date.now() / 1000) - (hours * 60 * 60);
+    const prices = await database.getHistoricalPricesForUser(asset.id, req.userId!, fromTimestamp);
+    res.json(prices);
+  } catch {
+    res.status(500).json({ success: false, message: '读取价格历史失败' });
+  }
 });
 
 app.get('/api/analysis/:assetId', authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -325,13 +396,14 @@ app.get('/api/recommendations/staged', authMiddleware, async (req: AuthRequest, 
 
 app.get('/api/recommendations/latest', authMiddleware, async (req: AuthRequest, res: Response) => {
   try {
-    res.json({ success: true, ...await database.getLatestRecommendationSnapshot() });
+    const snapshot = await database.getLatestRecommendationSnapshot();
+    res.json({ success: true, ...recommendationService.filterPublicSnapshot(snapshot) });
   } catch {
     res.status(500).json({ success: false, message: '读取推荐快照失败，请稍后重试' });
   }
 });
 
-app.post('/api/recommendations/run', authMiddleware, async (req: AuthRequest, res: Response) => {
+app.post('/api/recommendations/run', authMiddleware, adminMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const result = await recommendationService.generateAndSaveRecommendations('manual');
     res.json({ success: true, ...result });
@@ -342,7 +414,8 @@ app.post('/api/recommendations/run', authMiddleware, async (req: AuthRequest, re
 
 app.get('/api/recommendations/history', authMiddleware, async (req: AuthRequest, res: Response) => {
   const limit = Math.min(parseInt(req.query.limit as string) || 100, 500);
-  res.json({ success: true, history: await database.getRecommendationHistory(limit), runs: await database.getRecommendationRuns(20) });
+  const history = recommendationService.filterPublicHistory(await database.getRecommendationHistory(limit));
+  res.json({ success: true, history, runs: await database.getRecommendationRuns(20) });
 });
 
 app.get('/api/recommendations/health', authMiddleware, async (req: AuthRequest, res: Response) => {
@@ -350,6 +423,10 @@ app.get('/api/recommendations/health', authMiddleware, async (req: AuthRequest, 
 });
 
 app.get('/api/recommendations/report/:symbol', authMiddleware, async (req: AuthRequest, res: Response) => {
+  if (!recommendationService.isPublicStockSymbol(req.params.symbol)) {
+    res.status(404).json({ success: false, message: '股票不在公开候选池中' });
+    return;
+  }
   try {
     const report = await recommendationService.getStockReport(req.params.symbol);
     res.json({ success: true, report });
@@ -371,7 +448,7 @@ app.get('/api/research-profiles/:symbol', authMiddleware, async (req: AuthReques
   res.json({ success: true, profile });
 });
 
-app.post('/api/research-profiles', authMiddleware, async (req: AuthRequest, res: Response) => {
+app.post('/api/research-profiles', authMiddleware, adminMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const body = req.body;
     const factor = (key: string): StrategicFactor => ({
@@ -403,7 +480,7 @@ app.get('/api/recommendation-factors', authMiddleware, async (req: AuthRequest, 
   res.json({ success: true, factors: await database.getRecommendationFactors(true) });
 });
 
-app.post('/api/recommendation-factors', authMiddleware, async (req: AuthRequest, res: Response) => {
+app.post('/api/recommendation-factors', authMiddleware, adminMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const body = req.body || {};
     const factor: Partial<RecommendationFactor> & Pick<RecommendationFactor, 'name'> = {
@@ -428,7 +505,7 @@ app.get('/api/stock-factor-values/:symbol', authMiddleware, async (req: AuthRequ
   res.json({ success: true, values: await database.getStockFactorValues(req.params.symbol) });
 });
 
-app.post('/api/stock-factor-values', authMiddleware, async (req: AuthRequest, res: Response) => {
+app.post('/api/stock-factor-values', authMiddleware, adminMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const body = req.body || {};
     const value: StockFactorValue = {
@@ -445,7 +522,7 @@ app.post('/api/stock-factor-values', authMiddleware, async (req: AuthRequest, re
   }
 });
 
-app.post('/api/recommendation-reviews', authMiddleware, async (req: AuthRequest, res: Response) => {
+app.post('/api/recommendation-reviews', authMiddleware, adminMiddleware, async (req: AuthRequest, res: Response) => {
   try {
     const body = req.body || {};
     const allowedOutcomes: ReviewOutcome[] = ['accurate', 'inaccurate', 'mixed', 'pending'];
@@ -493,7 +570,7 @@ app.post('/api/stripe/portal', authMiddleware, async (req: AuthRequest, res: Res
 
 // ---- Config routes (protected) ----
 
-app.get('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
+app.get('/api/config', authMiddleware, adminMiddleware, (req: AuthRequest, res: Response) => {
   const envPath = path.join(__dirname, '../.env');
   if (fs.existsSync(envPath)) {
     const envContent = fs.readFileSync(envPath, 'utf-8');
@@ -545,7 +622,11 @@ app.get('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
   }
 });
 
-app.post('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
+app.post('/api/config', authMiddleware, adminMiddleware, (req: AuthRequest, res: Response) => {
+  if (process.env.VERCEL === '1') {
+    res.status(409).json({ success: false, message: '请在 Vercel 项目环境变量中修改配置并重新部署' });
+    return;
+  }
   try {
     const { threshold, interval, emailConfig, webhookConfig, telegramConfig } = req.body;
     const envPath = path.join(__dirname, '../.env');
@@ -595,7 +676,7 @@ app.post('/api/config', authMiddleware, (req: AuthRequest, res: Response) => {
 
 // ---- Notification test routes (protected) ----
 
-app.post('/api/test/email', authMiddleware, async (req: Request, res: Response) => {
+app.post('/api/test/email', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { host, port, user, pass, to } = req.body;
     const testNotifier = new NotificationService({ email: { enabled: true, host, port, user, pass, to } });
@@ -606,7 +687,7 @@ app.post('/api/test/email', authMiddleware, async (req: Request, res: Response) 
   }
 });
 
-app.post('/api/test/webhook', authMiddleware, async (req: Request, res: Response) => {
+app.post('/api/test/webhook', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { url, type } = req.body;
     const testNotifier = new NotificationService({ webhook: { enabled: true, url, type } });
@@ -617,7 +698,7 @@ app.post('/api/test/webhook', authMiddleware, async (req: Request, res: Response
   }
 });
 
-app.post('/api/test/telegram', authMiddleware, async (req: Request, res: Response) => {
+app.post('/api/test/telegram', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken, chatId, proxyHost, proxyPort } = req.body;
     const testNotifier = new NotificationService({ telegram: { enabled: true, botToken, chatId, proxyHost: proxyHost || undefined, proxyPort: proxyPort ? parseInt(proxyPort) : undefined } });
@@ -628,11 +709,11 @@ app.post('/api/test/telegram', authMiddleware, async (req: Request, res: Respons
   }
 });
 
-app.post('/api/telegram/qrcode', authMiddleware, async (req: Request, res: Response) => {
+app.post('/api/telegram/qrcode', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken } = req.body;
     if (!botToken) { res.status(400).json({ success: false, message: '请提供 Bot Token' }); return; }
-    const TelegramBot = require('node-telegram-bot-api');
+    const { default: TelegramBot } = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
     const botInfo = await bot.getMe();
     const deepLink = `https://t.me/${botInfo.username}?start=getchatid`;
@@ -643,11 +724,11 @@ app.post('/api/telegram/qrcode', authMiddleware, async (req: Request, res: Respo
   }
 });
 
-app.post('/api/telegram/chatid', authMiddleware, async (req: Request, res: Response) => {
+app.post('/api/telegram/chatid', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken } = req.body;
     if (!botToken) { res.status(400).json({ success: false, message: '请提供 Bot Token' }); return; }
-    const TelegramBot = require('node-telegram-bot-api');
+    const { default: TelegramBot } = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
     const updates = await bot.getUpdates({ limit: 10, timeout: 0 });
     if (updates.length === 0) { res.json({ success: false, message: '等待用户扫码...' }); return; }
@@ -663,11 +744,11 @@ app.post('/api/telegram/chatid', authMiddleware, async (req: Request, res: Respo
   }
 });
 
-app.post('/api/telegram/test', authMiddleware, async (req: Request, res: Response) => {
+app.post('/api/telegram/test', authMiddleware, adminMiddleware, async (req: Request, res: Response) => {
   try {
     const { botToken } = req.body;
     if (!botToken) { res.status(400).json({ success: false, message: '请提供 Bot Token' }); return; }
-    const TelegramBot = require('node-telegram-bot-api');
+    const { default: TelegramBot } = require('node-telegram-bot-api');
     const bot = new TelegramBot(botToken, { polling: false });
     const updates = await bot.getUpdates({ limit: 10 });
     if (updates.length === 0) { res.json({ success: false, message: '未找到消息记录。请先给 Bot 发送 /start' }); return; }
