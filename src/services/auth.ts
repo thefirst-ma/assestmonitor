@@ -34,7 +34,9 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<{ user: User; token: string }> {
     email = this.normalizeEmail(email);
-    if (typeof password !== 'string' || !password || Buffer.byteLength(password, 'utf8') > 72) throw new Error('邮箱或密码错误');
+    // Legacy accounts could be created before registration enforced bcrypt's
+    // 72-byte limit. Let bcrypt verify those existing hashes as it did then.
+    if (typeof password !== 'string' || !password) throw new Error('邮箱或密码错误');
 
     const user = await database.getUserByEmail(email);
     if (!user) throw new Error('邮箱或密码错误');

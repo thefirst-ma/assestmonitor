@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import axios from 'axios';
+import bcrypt from 'bcryptjs';
 
 test('registration and per-user notifications', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'investment-notifications-'));
@@ -48,6 +49,11 @@ test('registration and per-user notifications', async () => {
     assert.equal((await api('/api/auth/register', 'POST', { email: 'alice@example.com', password: 'password-123' })).status, 400);
     assert.equal((await api('/api/auth/login', 'POST', { email: 'ALICE@example.com', password: 'password-123' })).status, 200);
     assert.equal((await api('/api/auth/login', 'POST', { email: 'alice@example.com', password: 'incorrect' })).status, 400);
+    const legacyPassword = '汉'.repeat(30);
+    await database.createUser('legacy@example.com', await bcrypt.hash(legacyPassword, 10));
+    assert.equal((await api('/api/auth/login', 'POST', { email: 'legacy@example.com', password: legacyPassword })).status, 200);
+    assert.equal((await api('/api/auth/login', 'POST', { email: 'legacy@example.com', password: 'wrong-password' })).status, 400);
+    assert.equal((await api('/api/auth/register', 'POST', { email: 'too-long@example.com', password: legacyPassword })).status, 400);
     const token = a.data.token;
     assert.equal((await api('/api/recommendations/latest', 'GET', undefined, token)).data.run, null);
     const recommendations: any = { monthly: [{ symbol: 'TEST', name: 'Test stock', score: 80, action: 'watch', metrics: { volatility: .2 }, factorContributions: [] }], quarterly: [], yearly: [] };
